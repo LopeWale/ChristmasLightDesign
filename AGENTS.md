@@ -58,6 +58,6 @@ npm run dev
 - [x] **Gate 0:** Workspace Scaffold, Shared Schemas & `AGENTS.md`
 - [x] **Gate 1:** Multi-View 3D Reconstruction Service (`apps/recon-worker`)
 - [x] **Gate 2:** Gemini Spatial Calibration & 3D Back-Projection
-- [ ] **Gate 3:** Interactive 3D Night Studio & Parametric Multi-Orientation Light Tools
+- [x] **Gate 3:** Interactive 3D Night Studio & Parametric Multi-Orientation Light Tools
 - [ ] **Gate 4:** Deterministic Footage, NEC Electrical & Ladder Safety Engine (`bomMath.ts`)
 - [ ] **Gate 5:** Gemini Multimodal Design Co-Pilot, Hardware BOM & E2E Verification
