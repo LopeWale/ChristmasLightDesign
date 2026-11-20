@@ -58,6 +58,7 @@ export function InstancedBulbsLayer({
   const activePattern = useStudioStore((s) => s.activePattern);
   const activeHelixRadius = useStudioStore((s) => s.activeHelixRadius);
   const activeHelixTurns = useStudioStore((s) => s.activeHelixTurns);
+  const activeBrushRadius = useStudioStore((s) => s.activeBrushRadius);
 
   const instancedMeshRef = useRef<THREE.InstancedMesh>(null);
   const stakesMeshRef = useRef<THREE.InstancedMesh>(null);
@@ -100,7 +101,8 @@ export function InstancedBulbsLayer({
           surfaceMaterial: 'foliage_shrub',
         },
         feetPerSceneUnit,
-        draftScatterTriangles
+        draftScatterTriangles,
+        activeBrushRadius
       );
     }
     if (toolMode === 'HELICAL_WRAP' && draftPoints.length === 1) {
@@ -116,6 +118,7 @@ export function InstancedBulbsLayer({
     activeColorsHex,
     activePattern,
     feetPerSceneUnit,
+    activeBrushRadius,
   ]);
 
   const { flatBulbs, stakeSegments, wirePolylines } = useMemo(() => {

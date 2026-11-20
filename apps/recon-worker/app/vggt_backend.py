@@ -33,6 +33,21 @@ def filter_sky_and_low_confidence_depth(
     return cleaned
 
 
+def sanitize_vertex_normals(normals: np.ndarray) -> np.ndarray:
+    """Replace zero-norm or non-finite vertex normals with valid unit vectors."""
+    arr = np.array(normals, dtype=np.float64, copy=True)
+    if arr.ndim != 2 or arr.shape[1] != 3:
+        raise ValueError(f"Expected (N, 3) vertex normals, got {arr.shape}")
+    finite_rows = np.all(np.isfinite(arr), axis=1)
+    arr[~finite_rows] = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    zero_rows = norms.squeeze(-1) < 1e-6
+    if np.any(zero_rows):
+        arr[zero_rows] = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    return arr / norms
+
+
 def is_vggt_cuda_available() -> bool:
     """Return True only when CUDA + torch + vggt + open3d are all available."""
     for pkg in ("torch", "vggt", "open3d"):
@@ -193,7 +208,11 @@ class VGGTReconstructor(Reconstructor):
 
         verts = np.asarray(o3d_mesh.vertices, dtype=np.float64)
         faces = np.asarray(o3d_mesh.triangles, dtype=np.int64)
-        normals = np.asarray(o3d_mesh.vertex_normals, dtype=np.float64)
+        if len(verts) == 0 or len(faces) == 0:
+            raise RuntimeError(
+                "VGGT + Open3D TSDF integration produced an empty mesh after confidence filtering."
+            )
+        normals = sanitize_vertex_normals(np.asarray(o3d_mesh.vertex_normals, dtype=np.float64))
         if o3d_mesh.has_vertex_colors():
             vcolors = (np.asarray(o3d_mesh.vertex_colors) * 255.0).clip(0, 255).astype(np.uint8)
             alpha = np.full((len(verts), 1), 255, dtype=np.uint8)
@@ -221,8 +240,7 @@ class VGGTReconstructor(Reconstructor):
         cameras_path.write_text(cameras_payload.model_dump_json(indent=2), encoding="utf-8")
 
         ref_path = output_dir / "reference_front.png"
-        with Image.open(image_paths[0]) as src_img:
-            src_img.convert("RGB").save(ref_path, format="PNG")
+        Image.fromarray(rgb_np[0]).save(ref_path, format="PNG")
 
         bounds = tmesh.bounds
         stats = SceneMetadata(

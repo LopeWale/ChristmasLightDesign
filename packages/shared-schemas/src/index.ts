@@ -231,12 +231,27 @@ export const ReconstructionJobSchema = z.object({
   status: ReconstructionJobStatusSchema,
   progress: z.number().min(0).max(100),
   mode: ReconstructionModeSchema,
-  backendUsed: z.enum(['vggt', 'synthetic']).optional(),
-  glbUrl: z.string().optional(),
-  camerasUrl: z.string().optional(),
-  referenceImageUrl: z.string().optional(),
-  meshStats: SceneMetadataSchema.optional(),
-  error: z.string().optional(),
+  backendUsed: z
+    .enum(['vggt', 'synthetic'])
+    .nullish()
+    .transform((v) => v ?? undefined),
+  glbUrl: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  camerasUrl: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  referenceImageUrl: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  meshStats: SceneMetadataSchema.nullish().transform((v) => v ?? undefined),
+  error: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type ReconstructionJob = z.infer<typeof ReconstructionJobSchema>;
 
@@ -267,7 +282,10 @@ export const CalibrationDetectionResultSchema = z.object({
   front_door: BoundingBox2DSchema.nullable(),
   garage_door: BoundingBox2DSchema.nullable(),
   zones: z.array(DetectedZoneSchema),
-  notes: z.string().optional(),
+  notes: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type CalibrationDetectionResult = z.infer<
   typeof CalibrationDetectionResultSchema
@@ -278,7 +296,10 @@ export type CalibrationDetectionResult = z.infer<
 // ---------------------------------------------------------------------------
 
 export const ConceptRunMutationSchema = z.object({
-  runId: z.string().optional(),
+  runId: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
   bulbPreset: BulbPresetSchema,
   colorsHex: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).min(1),
   pattern: LightPatternSchema,
@@ -345,7 +366,10 @@ export const BOMReportSchema = z.object({
   mountingHardware: z.array(BOMMountingHardwareItemSchema),
   powerDistribution: z.array(BOMPowerDistributionItemSchema),
   safetyAndInstallPlan: z.array(BOMSafetyInstallStepSchema),
-  summaryNotes: z.string().optional(),
+  summaryNotes: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type BOMReport = z.infer<typeof BOMReportSchema>;
 

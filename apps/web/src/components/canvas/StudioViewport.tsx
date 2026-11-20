@@ -14,15 +14,13 @@ function CanvasScreenshotRegistrar({
 }: {
   onRegisterCapture?: (captureFn: () => string) => void;
 }) {
-  const { gl, scene, camera } = useThree();
+  const { gl } = useThree();
 
   useEffect(() => {
     if (!onRegisterCapture) return;
-    onRegisterCapture(() => {
-      gl.render(scene, camera);
-      return gl.domElement.toDataURL('image/png');
-    });
-  }, [gl, scene, camera, onRegisterCapture]);
+    // preserveDrawingBuffer: true retains EffectComposer's composited Bloom frame
+    onRegisterCapture(() => gl.domElement.toDataURL('image/png'));
+  }, [gl, onRegisterCapture]);
 
   return null;
 }
@@ -167,6 +165,24 @@ export function StudioViewport({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // Ensure releasing pointer outside mesh/canvas while painting scatter never locks OrbitControls
+  useEffect(() => {
+    if (!isPaintingScatter) return;
+    const finishScatterOffMesh = () => {
+      const state = useStudioStore.getState();
+      if (state.isPaintingScatter) {
+        state.setPaintingScatter(false);
+        state.commitDraftRun();
+      }
+    };
+    window.addEventListener('pointerup', finishScatterOffMesh);
+    window.addEventListener('pointercancel', finishScatterOffMesh);
+    return () => {
+      window.removeEventListener('pointerup', finishScatterOffMesh);
+      window.removeEventListener('pointercancel', finishScatterOffMesh);
+    };
+  }, [isPaintingScatter]);
 
   const cursorRadius =
     toolMode === 'SURFACE_SCATTER' ? activeBrushRadius : 0.11;

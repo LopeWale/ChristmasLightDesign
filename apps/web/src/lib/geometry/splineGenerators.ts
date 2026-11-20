@@ -426,7 +426,8 @@ export function generatePathwayStakeBulbs(params: {
 export function recomputeRunBulbPositions(
   run: Omit<LightRun, 'bulbPositions'> & { bulbPositions?: Vec3[] },
   feetPerSceneUnit: number,
-  scatterTriangles?: SurfaceTriangle[]
+  scatterTriangles?: SurfaceTriangle[],
+  brushRadiusSceneUnits?: number
 ): Vec3[] {
   switch (run.toolMode) {
     case 'LINEAR_EAVE':
@@ -454,6 +455,7 @@ export function recomputeRunBulbPositions(
       return generateSurfaceScatterBulbs({
         strokeCenters: run.controlPoints,
         triangles: scatterTriangles,
+        brushRadiusSceneUnits,
         spacingInches: run.spacingInches,
         feetPerSceneUnit,
       });

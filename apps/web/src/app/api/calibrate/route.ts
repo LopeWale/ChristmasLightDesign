@@ -93,6 +93,9 @@ function buildMockCalibrationResult(): CalibrationDetectionResult {
   };
 }
 
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+const SAFE_ARTIFACT_RE = /^[a-zA-Z0-9._-]+$/;
+
 async function resolveImagePayload(body: {
   imageBase64?: string;
   referenceImageUrl?: string;
@@ -105,18 +108,30 @@ async function resolveImagePayload(body: {
     /\/+$/,
     ''
   );
-  let fetchUrl = body.referenceImageUrl || '';
+  let fetchUrl = '';
+
   if (body.jobId) {
-    fetchUrl = `${workerBase}/jobs/${encodeURIComponent(body.jobId)}/artifacts/reference_front.png`;
-  } else if (fetchUrl.startsWith('/api/reconstruct')) {
-    const parsedUrl = new URL(fetchUrl, 'http://localhost:3000');
-    const jId = parsedUrl.searchParams.get('jobId');
-    const art = parsedUrl.searchParams.get('artifact') || 'reference_front.png';
-    if (jId) {
-      fetchUrl = `${workerBase}/jobs/${encodeURIComponent(jId)}/artifacts/${encodeURIComponent(art)}`;
+    if (!SAFE_ID_RE.test(body.jobId)) {
+      throw new Error('Invalid jobId format');
     }
-  } else if (fetchUrl.startsWith('/')) {
-    fetchUrl = `${workerBase}${fetchUrl}`;
+    fetchUrl = `${workerBase}/jobs/${encodeURIComponent(body.jobId)}/artifacts/reference_front.png`;
+  } else if (body.referenceImageUrl) {
+    const rawUrl = body.referenceImageUrl.trim();
+    if (rawUrl.startsWith('/api/reconstruct')) {
+      const parsedUrl = new URL(rawUrl, 'http://localhost:3000');
+      const jId = parsedUrl.searchParams.get('jobId') || '';
+      const art = parsedUrl.searchParams.get('artifact') || 'reference_front.png';
+      if (!SAFE_ID_RE.test(jId) || !SAFE_ARTIFACT_RE.test(art)) {
+        throw new Error('Invalid or disallowed referenceImageUrl parameters');
+      }
+      fetchUrl = `${workerBase}/jobs/${encodeURIComponent(jId)}/artifacts/${encodeURIComponent(art)}`;
+    } else {
+      const match = rawUrl.match(/^\/jobs\/([a-zA-Z0-9_-]+)\/artifacts\/([a-zA-Z0-9._-]+)$/);
+      if (!match) {
+        throw new Error('Invalid or disallowed referenceImageUrl; only worker job artifacts are permitted.');
+      }
+      fetchUrl = `${workerBase}/jobs/${encodeURIComponent(match[1])}/artifacts/${encodeURIComponent(match[2])}`;
+    }
   }
 
   if (!fetchUrl) {
@@ -181,7 +196,11 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json(validated);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Spatial calibration failed';
-    const status = message.includes('GEMINI_API_KEY') ? 503 : 500;
+    const status = message.includes('GEMINI_API_KEY')
+      ? 503
+      : message.includes('Invalid') || message.includes('Provide imageBase64')
+        ? 400
+        : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

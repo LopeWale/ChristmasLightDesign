@@ -206,4 +206,46 @@ describe('Gate 3: Parametric Multi-Orientation Spline Generators', () => {
     useStudioStore.getState().importProjectJson(json);
     expect(useStudioStore.getState().runs).toHaveLength(1);
   });
+
+  it('accumulates SURFACE_SCATTER triangles across brush strokes, honors activeBrushRadius, and keeps bulbs on surface after setCalibration', () => {
+    const store = useStudioStore.getState();
+    store.clearRuns();
+    store.setCalibration(3.28084, 'AUTO_DOOR');
+    store.setToolMode('SURFACE_SCATTER');
+    store.setActiveBrushRadius(0.9);
+    store.setActiveSpacingInches(6);
+
+    const patchLeft = [
+      {
+        a: [-2, 0, 4] as Vec3,
+        b: [-1, 0, 4] as Vec3,
+        c: [-1, 1, 4] as Vec3,
+        normal: [0, 0, 1] as Vec3,
+      },
+    ];
+    const patchRight = [
+      {
+        a: [1, 0, 4] as Vec3,
+        b: [2, 0, 4] as Vec3,
+        c: [2, 1, 4] as Vec3,
+        normal: [0, 0, 1] as Vec3,
+      },
+    ];
+
+    useStudioStore.getState().appendDraftPoint([-1.4, 0.4, 4.02], 'foliage_shrub', patchLeft);
+    useStudioStore.getState().appendDraftPoint([1.6, 0.4, 4.02], 'foliage_shrub', patchRight);
+
+    const committed = useStudioStore.getState().commitDraftRun('Painted Shrub');
+    expect(committed).not.toBeNull();
+    // Both left (x < 0) and right (x > 0) patches should have bulbs
+    expect(committed!.bulbPositions.some((b) => b[0] < -0.5)).toBe(true);
+    expect(committed!.bulbPositions.some((b) => b[0] > 0.5)).toBe(true);
+
+    // Rescaling via setCalibration must preserve surface normal plane z = 4.02 (not mid-air fallback)
+    useStudioStore.getState().setCalibration(3.5, 'MANUAL_RULER');
+    const rescaled = useStudioStore.getState().runs[0];
+    for (const b of rescaled.bulbPositions) {
+      expect(b[2]).toBeCloseTo(4.02, 4);
+    }
+  });
 });

@@ -212,3 +212,22 @@ def test_multipart_video_reconstruct_and_vggt_missing_dep_reporting(tmp_path: Pa
     assert done["status"] == "completed"
     assert done["meshStats"]["faceCount"] > 100
 
+
+def test_vggt_sanitize_vertex_normals_replaces_zero_and_nan_vectors():
+    from app.vggt_backend import sanitize_vertex_normals
+
+    raw = np.array(
+        [
+            [0.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [np.nan, 1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    cleaned = sanitize_vertex_normals(raw)
+    assert cleaned.shape == (3, 3)
+    assert not np.isnan(cleaned).any()
+    norms = np.linalg.norm(cleaned, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-6)
+
+

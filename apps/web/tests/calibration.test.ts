@@ -159,4 +159,22 @@ describe('Gate 2: Spatial Calibration & 3D Back-Projection', () => {
     delete process.env.GEMINI_API_KEY;
     expect(() => getGenAIClient()).toThrow(/GEMINI_API_KEY/);
   });
+
+  it('blocks arbitrary external SSRF referenceImageUrl in POST /api/calibrate', async () => {
+    process.env.GEMINI_MOCK_MODE = 'false';
+    process.env.GEMINI_API_KEY = 'dummy-key-never-called';
+
+    const req = new Request('http://localhost:3000/api/calibrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        referenceImageUrl: 'http://169.254.169.254/latest/meta-data/',
+      }),
+    });
+
+    const resp = await calibratePost(req);
+    expect(resp.status).toBe(400);
+    const body = await resp.json();
+    expect(body.error).toMatch(/Invalid or disallowed referenceImageUrl/i);
+  });
 });

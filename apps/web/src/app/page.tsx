@@ -11,6 +11,7 @@ import {
 } from '@lumen3d/shared-schemas';
 import { Toolbar } from '@/components/panels/Toolbar';
 import { TelemetryHUD } from '@/components/panels/TelemetryHUD';
+import { CopilotDrawer } from '@/components/panels/CopilotDrawer';
 import { CalibrationOverlay } from '@/components/canvas/CalibrationOverlay';
 import { computeDesignTelemetry } from '@/lib/geometry/bomMath';
 import { calibrateScaleFromDetection } from '@/lib/geometry/raycastCalibration';
@@ -198,7 +199,14 @@ export default function HomePage() {
     }
   };
 
-  void screenshotFnRef;
+  const captureNightScreenshot = useCallback((): string | null => {
+    if (!screenshotFnRef.current) return null;
+    try {
+      return screenshotFnRef.current();
+    } catch {
+      return null;
+    }
+  }, []);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-studio-bg text-slate-100">
@@ -336,6 +344,11 @@ export default function HomePage() {
             </div>
           )}
         </main>
+
+        <CopilotDrawer
+          telemetry={telemetry}
+          captureNightScreenshot={captureNightScreenshot}
+        />
       </div>
     </div>
   );

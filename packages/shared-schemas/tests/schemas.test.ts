@@ -165,8 +165,24 @@ describe('shared-schemas core contracts', () => {
       camerasUrl: '/jobs/job-123/artifacts/cameras.json',
       referenceImageUrl: '/jobs/job-123/artifacts/reference_front.png',
       meshStats: metadata,
+      error: null,
     });
     expect(job.status).toBe('completed');
+
+    // FastAPI / Pydantic v2 serializes unset Optional fields as explicit JSON null when queued
+    const queuedPydanticJob = ReconstructionJobSchema.parse({
+      jobId: 'demo-queued',
+      status: 'queued',
+      progress: 0,
+      mode: 'synthetic',
+      backendUsed: null,
+      glbUrl: null,
+      camerasUrl: null,
+      referenceImageUrl: null,
+      meshStats: null,
+      error: null,
+    });
+    expect(queuedPydanticJob.status).toBe('queued');
   });
 
   it('validates CalibrationDetectionResult, CritiqueReport, and BOMReport', () => {

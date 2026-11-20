@@ -57,6 +57,10 @@ export interface StudioState {
   draftPoints: Vec3[];
   draftSurfaceMaterial: SurfaceMaterial;
   draftScatterTriangles: SurfaceTriangle[];
+  scatterMetaByRunId: Record<
+    string,
+    { triangles: SurfaceTriangle[]; brushRadius: number }
+  >;
   isPaintingScatter: boolean;
 
   // Runs + Selection + Undo/Redo stacks
@@ -192,6 +196,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   draftPoints: [],
   draftSurfaceMaterial: 'metal_gutter',
   draftScatterTriangles: [],
+  scatterMetaByRunId: {},
   isPaintingScatter: false,
 
   runs: [],
@@ -214,10 +219,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       feetPerSceneUnit: safeScale,
       calibrationSource,
       calibrationError: null,
-      runs: state.runs.map((run) => ({
-        ...run,
-        bulbPositions: recomputeRunBulbPositions(run, safeScale),
-      })),
+      runs: state.runs.map((run) => {
+        const meta = state.scatterMetaByRunId[run.id];
+        return {
+          ...run,
+          bulbPositions: recomputeRunBulbPositions(
+            run,
+            safeScale,
+            meta?.triangles,
+            meta?.brushRadius
+          ),
+        };
+      }),
     }));
   },
 
@@ -278,15 +291,23 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ activeBrushRadius: Math.max(0.1, activeBrushRadius) }),
 
   appendDraftPoint: (pt, surfaceMaterial, triangles) =>
-    set((state) => ({
-      draftPoints: [...state.draftPoints, pt],
-      draftSurfaceMaterial:
-        state.draftPoints.length === 0 && surfaceMaterial
-          ? surfaceMaterial
-          : state.draftSurfaceMaterial,
-      draftScatterTriangles:
-        triangles && triangles.length > 0 ? triangles : state.draftScatterTriangles,
-    })),
+    set((state) => {
+      let mergedTris = state.draftScatterTriangles;
+      if (triangles && triangles.length > 0) {
+        mergedTris = [...state.draftScatterTriangles, ...triangles];
+        if (mergedTris.length > 1800) {
+          mergedTris = mergedTris.slice(mergedTris.length - 1800);
+        }
+      }
+      return {
+        draftPoints: [...state.draftPoints, pt],
+        draftSurfaceMaterial:
+          state.draftPoints.length === 0 && surfaceMaterial
+            ? surfaceMaterial
+            : state.draftSurfaceMaterial,
+        draftScatterTriangles: mergedTris,
+      };
+    }),
 
   setPaintingScatter: (isPaintingScatter) => set({ isPaintingScatter }),
 
@@ -359,7 +380,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const bulbPositions = recomputeRunBulbPositions(
       baseRun,
       feetPerSceneUnit,
-      draftScatterTriangles
+      draftScatterTriangles,
+      state.activeBrushRadius
     );
     if (bulbPositions.length === 0) {
       set({ draftPoints: [], draftScatterTriangles: [], isPaintingScatter: false });
@@ -376,6 +398,16 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       futureRuns: [],
       runs: [...prev.runs, fullRun],
       selectedRunId: fullRun.id,
+      scatterMetaByRunId:
+        toolMode === 'SURFACE_SCATTER'
+          ? {
+              ...prev.scatterMetaByRunId,
+              [fullRun.id]: {
+                triangles: draftScatterTriangles,
+                brushRadius: state.activeBrushRadius,
+              },
+            }
+          : prev.scatterMetaByRunId,
       draftPoints: [],
       draftScatterTriangles: [],
       isPaintingScatter: false,
@@ -426,8 +458,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         patch.spacingInches !== undefined ||
         patch.helixParams !== undefined;
 
+      const scatterMeta = state.scatterMetaByRunId[runId];
       const nextBulbs = needsGeometryRecompute
-        ? recomputeRunBulbPositions(updatedBase, state.feetPerSceneUnit)
+        ? recomputeRunBulbPositions(
+            updatedBase,
+            state.feetPerSceneUnit,
+            scatterMeta?.triangles,
+            scatterMeta?.brushRadius
+          )
         : updatedBase.bulbPositions;
 
       return {
@@ -512,9 +550,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           pattern: matched.pattern,
           spacingInches: effectiveSpacing,
         };
+        const scatterMeta = state.scatterMetaByRunId[run.id];
         return {
           ...mutated,
-          bulbPositions: recomputeRunBulbPositions(mutated, state.feetPerSceneUnit),
+          bulbPositions: recomputeRunBulbPositions(
+            mutated,
+            state.feetPerSceneUnit,
+            scatterMeta?.triangles,
+            scatterMeta?.brushRadius
+          ),
         };
       });
 
