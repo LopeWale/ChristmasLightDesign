@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lumen3d-recon-worker"
+version = "0.1.0"
+description = "Lumen3D Multi-View 3D Exterior Reconstruction Microservice (VGGT + Open3D & Synthetic Backends)"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "python-multipart>=0.0.12",
+  "pydantic>=2.9.0",
+  "numpy>=1.26.0",
+  "trimesh>=4.5.0",
+  "scipy>=1.13.0",
+  "pillow>=10.4.0",
+  "opencv-python-headless>=4.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

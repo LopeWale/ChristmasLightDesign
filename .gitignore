@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.venv/
+apps/recon-worker/.venv/
+
+# Build & Next.js outputs
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+apps/recon-worker/jobs_data/
+
+# Test outputs
+playwright-report/
+test-results/
+coverage/
+
+# Secrets & local environment
+.env
+.env.*
+!.env.example
+
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+.superpowers/
