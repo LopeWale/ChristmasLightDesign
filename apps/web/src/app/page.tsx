@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import type * as THREE from 'three';
 import { Sparkles, UploadCloud, Loader2 } from 'lucide-react';
@@ -10,7 +10,9 @@ import {
   ReconstructionJobSchema,
 } from '@lumen3d/shared-schemas';
 import { Toolbar } from '@/components/panels/Toolbar';
+import { TelemetryHUD } from '@/components/panels/TelemetryHUD';
 import { CalibrationOverlay } from '@/components/canvas/CalibrationOverlay';
+import { computeDesignTelemetry } from '@/lib/geometry/bomMath';
 import { calibrateScaleFromDetection } from '@/lib/geometry/raycastCalibration';
 import { useStudioStore } from '@/store/useStudioStore';
 
@@ -35,6 +37,19 @@ export default function HomePage() {
   const rulerPoints = useStudioStore((s) => s.rulerPoints);
   const isCalibrating = useStudioStore((s) => s.isCalibrating);
   const calibrationError = useStudioStore((s) => s.calibrationError);
+  const runs = useStudioStore((s) => s.runs);
+  const groundMinY = useStudioStore((s) => s.groundMinY);
+
+  const telemetry = useMemo(
+    () =>
+      computeDesignTelemetry({
+        runs,
+        feetPerSceneUnit,
+        calibrationSource,
+        groundMinY,
+      }),
+    [runs, feetPerSceneUnit, calibrationSource, groundMinY]
+  );
 
   const setJob = useStudioStore((s) => s.setJob);
   const setCameras = useStudioStore((s) => s.setCameras);
@@ -269,6 +284,11 @@ export default function HomePage() {
               onClearRulerPoints={clearRulerPoints}
               onApplyManualScale={(scale) => setCalibration(scale, 'MANUAL_RULER')}
             />
+          </div>
+
+          {/* Bottom-right Live Electrical & Footage Telemetry HUD */}
+          <div className="pointer-events-none absolute bottom-4 right-4 z-10 w-[420px] max-w-[calc(100%-2rem)]">
+            <TelemetryHUD telemetry={telemetry} />
           </div>
 
           {/* Empty state welcome card before loading a 3D facade */}
