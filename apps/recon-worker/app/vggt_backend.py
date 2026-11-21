@@ -50,6 +50,10 @@ def sanitize_vertex_normals(normals: np.ndarray) -> np.ndarray:
 
 def is_vggt_cuda_available() -> bool:
     """Return True only when CUDA + torch + vggt + open3d are all available."""
+    import sys
+
+    if sys.platform == "darwin":
+        return False
     for pkg in ("torch", "vggt", "open3d"):
         if importlib.util.find_spec(pkg) is None:
             return False

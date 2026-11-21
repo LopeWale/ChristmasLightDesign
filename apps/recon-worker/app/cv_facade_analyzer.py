@@ -164,7 +164,7 @@ def analyze_facade_images(
     elif aspect_hw < 1.38:
         floors = max(3, min(4, len(peaks) if len(peaks) >= 3 else 3))
     else:
-        floors = max(3, min(6, len(peaks) if len(peaks) >= 3 else 4))
+        floors = 3 if len(peaks) <= 4 else min(6, len(peaks) - 1)
 
     floors = int(np.clip(floors, 1, 8))
 
@@ -218,38 +218,92 @@ def analyze_facade_images(
         top_bgr = np.median(top_patch.reshape(-1, 3), axis=0)
         roof_rgb = _clamp_rgb((top_bgr[2] * 0.75, top_bgr[1] * 0.75, top_bgr[0] * 0.75))
 
-    # Detect prominent horizontal balcony slabs/railings on upper floors
+    # Detect protruding horizontal balcony slabs/railings via paired opposite-sign horizontal edges
+    # separated by 4..26px (rejecting both 1-2px cladding seams and monotonic two-tone siding steps)
     balconies: list[BalconySpecModel] = []
-    if floors >= 2:
-        for fl in range(2, min(floors, 5) + 1):
-            # Band near floor deck level from top of building down
-            rel_y = 1.0 - (float(fl - 1) / float(floors))
-            band_center = int(rel_y * body_h)
-            y_lo = max(0, band_center - max(6, body_h // 14))
-            y_hi = min(body_h, band_center + max(6, body_h // 14))
-            if y_hi > y_lo:
-                band_slice = abs_gy[y_lo:y_hi, :]
-                strong_cols = (band_slice.max(axis=0) > max(28.0, energy_thresh * 1.15)).astype(np.float32)
-                span_ratio = float(strong_cols.mean())
-                if span_ratio >= 0.24 or (floors >= 3 and roof_style == "flat_parapet" and fl in (2, 3)):
-                    active_xs = np.where(strong_cols > 0.5)[0]
-                    if len(active_xs) > 4:
-                        cx_norm = ((float(np.median(active_xs)) / float(bldg_w)) - 0.5) * 0.65
-                    else:
-                        cx_norm = -0.16 if fl % 2 == 0 else 0.16
-                    cx_norm = float(np.clip(round(cx_norm, 2), -0.32, 0.32))
-                    balconies.append(
-                        BalconySpecModel(
-                            id=f"cv-balcony-f{fl}",
-                            floor=fl,
-                            wallFace="front",
-                            centerOffsetNorm=cx_norm,
-                            widthMeters=3.4,
-                            depthMeters=1.4,
-                            mountStyle="cantilevered",
-                            railingType="metal_picket",
-                        )
+    signed_gy = cv2.Sobel(body_gray, cv2.CV_32F, 0, 1, ksize=3)
+    row_signed = signed_gy.mean(axis=1)
+    edge_mag_thresh = max(22.0, float(np.percentile(np.abs(row_signed), 78)))
+
+    slab_centers_y: list[int] = []
+    y_scan = max(4, int(body_h * 0.12))
+    y_scan_limit = max(y_scan + 1, int(body_h * 0.76))
+    while y_scan < min(body_h - 6, y_scan_limit):
+        g0 = float(row_signed[y_scan])
+        if abs(g0) >= edge_mag_thresh:
+            # Look 4..26px ahead for the opposite-sign return edge of a physical slab/railing band
+            y_end = min(body_h - 1, y_scan + 26)
+            partner = -1
+            best_opp = 0.0
+            for y2 in range(y_scan + 4, y_end + 1):
+                g1 = float(row_signed[y2])
+                if g0 * g1 < 0 and abs(g1) >= edge_mag_thresh * 0.75:
+                    if abs(g1) > best_opp:
+                        best_opp = abs(g1)
+                        partner = y2
+            if partner != -1 and partner > y_scan + 2:
+                mid_y = (y_scan + partner) // 2
+                top_edge_cols = (signed_gy[max(0, y_scan - 1) : y_scan + 2, :] * np.sign(g0)).max(axis=0) > 28.0
+                bot_edge_cols = (-signed_gy[max(0, partner - 1) : min(body_h, partner + 2), :] * np.sign(g0)).max(axis=0) > 28.0
+                paired_cols = top_edge_cols & bot_edge_cols
+                paired_span = float(paired_cols.mean())
+
+                above_y = max(0, y_scan - 3)
+                below_y = min(body_h - 1, partner + 3)
+                if paired_span >= 0.42:
+                    above_luma = float(body_gray[above_y, paired_cols].mean())
+                    below_luma = float(body_gray[below_y, paired_cols].mean())
+                    slab_luma = float(body_gray[y_scan + 1 : partner, paired_cols].mean())
+                    is_bright_slab = slab_luma >= max(above_luma, below_luma) + 18.0
+                    is_dark_iron_rail = (
+                        slab_luma <= min(above_luma, below_luma) - 22.0
+                        and (partner - y_scan) <= 14
                     )
+                    if is_bright_slab or is_dark_iron_rail:
+                        slab_centers_y.append(mid_y)
+                        y_scan = partner + max(6, body_h // 12)
+                        continue
+        y_scan += 1
+
+    if floors >= 2 and slab_centers_y:
+        assigned_floors: set[int] = set()
+        for mid_y in slab_centers_y:
+            # Map vertical position (0=top .. body_h=bottom) to upper floor index (2..floors)
+            rel_from_bottom = 1.0 - (float(mid_y) / float(max(1, body_h)))
+            fl = int(np.clip(round(rel_from_bottom * floors) + 1, 2, min(floors, 5)))
+            if fl in assigned_floors:
+                # If multiple slabs sit in the upper stories, assign next free upper floor
+                for alt_fl in range(2, min(floors, 5) + 1):
+                    if alt_fl not in assigned_floors:
+                        fl = alt_fl
+                        break
+            if fl in assigned_floors:
+                continue
+            assigned_floors.add(fl)
+
+            band_abs = abs_gy[max(0, mid_y - 6) : min(body_h, mid_y + 7), :]
+            strong_cols = (
+                band_abs.max(axis=0) > max(28.0, energy_thresh * 1.15)
+            ).astype(np.float32)
+            active_xs = np.where(strong_cols > 0.5)[0]
+            if len(active_xs) > 4:
+                cx_norm = ((float(np.median(active_xs)) / float(bldg_w)) - 0.5) * 0.65
+            else:
+                cx_norm = -0.16 if fl % 2 == 0 else 0.16
+            cx_norm = float(np.clip(round(cx_norm, 2), -0.32, 0.32))
+            balconies.append(
+                BalconySpecModel(
+                    id=f"cv-balcony-f{fl}",
+                    floor=fl,
+                    wallFace="front",
+                    centerOffsetNorm=cx_norm,
+                    widthMeters=3.4,
+                    depthMeters=1.4,
+                    mountStyle="cantilevered",
+                    railingType="metal_picket",
+                )
+            )
+        balconies.sort(key=lambda b: b.floor)
 
     # Set proportional metric footprint width/depth from building aspect & floor height
     est_height_m = floors * 3.05

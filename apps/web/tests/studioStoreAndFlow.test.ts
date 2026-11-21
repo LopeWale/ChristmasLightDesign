@@ -4,7 +4,9 @@ import path from 'node:path';
 import {
   resolveAddressLaunchAction,
   loadSamplePresetWithFallback,
+  pollReconstructionJob,
 } from '../src/lib/studioLaunchFlow';
+import * as reconstructRoute from '../src/app/api/reconstruct/route';
 import { GET as reconstructGet } from '../src/app/api/reconstruct/route';
 import { useStudioStore } from '../src/store/useStudioStore';
 
@@ -145,5 +147,74 @@ describe('Task 4: Progressive Studio Launch Flow & Zero-Failure Fallback', () =>
       '../public/draco/draco_decoder.wasm'
     );
     expect(fs.existsSync(dracoWasm)).toBe(true);
+  });
+
+  it('exports dynamic=force-dynamic and no-store headers on GET /api/reconstruct status polling', async () => {
+    expect((reconstructRoute as Record<string, unknown>).dynamic).toBe(
+      'force-dynamic'
+    );
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          jobId: 'recon-abc',
+          status: 'processing',
+          progress: 45,
+          mode: 'auto',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )) as typeof fetch;
+
+    try {
+      const resp = await reconstructGet(
+        new Request('http://localhost:3000/api/reconstruct?jobId=recon-abc')
+      );
+      expect(resp.status).toBe(200);
+      expect(resp.headers.get('cache-control')).toContain('no-store');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
+  it('pollReconstructionJob resets inactivity deadline whenever job.progress advances and reports live progress', async () => {
+    const progressHistory: number[] = [];
+    const sequence = [
+      { status: 'queued', progress: 0 },
+      { status: 'processing', progress: 15 },
+      { status: 'processing', progress: 45 },
+      { status: 'processing', progress: 80 },
+      {
+        status: 'completed',
+        progress: 100,
+        backendUsed: 'architectural',
+        glbUrl: '/api/reconstruct?jobId=recon-1&artifact=scene.glb',
+      },
+    ];
+    let idx = 0;
+
+    const stubFetch: typeof fetch = async () => {
+      const item = sequence[Math.min(idx++, sequence.length - 1)];
+      return new Response(
+        JSON.stringify({
+          jobId: 'recon-1',
+          mode: 'auto',
+          ...item,
+        }),
+        { status: 200 }
+      );
+    };
+
+    const completed = await pollReconstructionJob('recon-1', {
+      fetchImpl: stubFetch,
+      initialPollMs: 1,
+      steadyPollMs: 2,
+      inactivityTimeoutMs: 50,
+      maxTotalTimeoutMs: 500,
+      onProgress: (job) => progressHistory.push(job.progress),
+    });
+
+    expect(completed.status).toBe('completed');
+    expect(progressHistory).toEqual([0, 15, 45, 80, 100]);
   });
 });

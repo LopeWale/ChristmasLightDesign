@@ -21,6 +21,7 @@ export interface StudioLauncherProps {
   onUploadFiles: (files: FileList, reconMode: 'auto' | 'da3') => Promise<void>;
   onLoadSample: (preset: 'condo' | 'house') => Promise<void>;
   isBusy: boolean;
+  progressPercent?: number | null;
   guideMessage: string | null;
   errorMessage: string | null;
   canDismiss?: boolean;
@@ -34,6 +35,7 @@ export function StudioLauncher({
   onUploadFiles,
   onLoadSample,
   isBusy,
+  progressPercent = null,
   guideMessage,
   errorMessage,
   canDismiss = false,
@@ -156,6 +158,29 @@ export function StudioLauncher({
               <Building2 className="h-3.5 w-3.5" />
               Open 3-Story Condo Template
             </button>
+          </div>
+        </div>
+      )}
+
+      {isBusy && progressPercent !== null && (
+        <div
+          data-testid="launcher-progress"
+          className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-xs text-amber-100"
+        >
+          <div className="flex items-center justify-between font-medium">
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-300" />
+              Reconstructing 3D exterior…
+            </span>
+            <span className="tabular-nums text-amber-200">
+              {Math.round(progressPercent)}%
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-amber-400 transition-all duration-200"
+              style={{ width: `${Math.max(8, Math.min(100, progressPercent))}%` }}
+            />
           </div>
         </div>
       )}

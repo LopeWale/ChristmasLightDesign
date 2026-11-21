@@ -18,6 +18,25 @@ import {
   mapsContextToPartialOverrides,
 } from '@/lib/maps/buildingContext';
 
+export const dynamic = 'force-dynamic';
+
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
 function getWorkerBaseUrl(): string {
   return (process.env.RECON_WORKER_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
 }
@@ -286,19 +305,22 @@ export async function POST(request: Request): Promise<Response> {
         mapsKey &&
         mapsKey !== 'your_google_maps_api_key_here'
       ) {
-        try {
-          mapsCtx = await fetchGoogleMapsBuildingContext(address, mapsKey);
-        } catch {
-          // Proceed cleanly with photo/video analysis if Maps lookup fails
-          mapsCtx = null;
-        }
+        mapsCtx = await withTimeout(
+          fetchGoogleMapsBuildingContext(address, mapsKey),
+          8_000,
+          null
+        );
       }
 
       let specToForward = explicitSpecJson;
       if (!specToForward) {
-        const extracted = await extractSpecWithGeminiIfAvailable(
-          uploadedFiles,
-          mapsCtx
+        const fallbackSpec = mapsCtx
+          ? mapsContextToPartialOverrides(mapsCtx)
+          : null;
+        const extracted = await withTimeout(
+          extractSpecWithGeminiIfAvailable(uploadedFiles, mapsCtx),
+          12_000,
+          fallbackSpec
         );
         if (extracted) {
           specToForward = JSON.stringify(extracted);
@@ -355,7 +377,9 @@ export async function POST(request: Request): Promise<Response> {
 
     const rawJob = await upstreamResp.json();
     const parsed = ReconstructionJobSchema.parse(rawJob);
-    return NextResponse.json(rewriteJobUrls(parsed));
+    return NextResponse.json(rewriteJobUrls(parsed), {
+      headers: NO_STORE_HEADERS,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to reach recon-worker';
     return NextResponse.json({ error: message }, { status: 502 });
@@ -412,7 +436,9 @@ export async function GET(request: Request): Promise<Response> {
 
     const rawJob = await statusResp.json();
     const parsed = ReconstructionJobSchema.parse(rawJob);
-    return NextResponse.json(rewriteJobUrls(parsed));
+    return NextResponse.json(rewriteJobUrls(parsed), {
+      headers: NO_STORE_HEADERS,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to poll recon-worker';
     return NextResponse.json({ error: message }, { status: 502 });

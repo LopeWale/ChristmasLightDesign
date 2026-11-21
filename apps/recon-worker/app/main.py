@@ -1,21 +1,34 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import threading
+import time
 from typing import Any
 import uuid
 
+import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.reconstructor import select_reconstructor
-from app.schemas import ArchitecturalBuildingSpecModel, ReconstructionJob
-from app.video_keyframes import extract_sharp_keyframes
+# Prevent OpenCV pthreads/GCD thread-pool contention inside ThreadPoolExecutor workers on macOS
+cv2.setNumThreads(1)
+
+# Eagerly import core reconstructors on the main thread so concurrent worker threads never
+# race on lazy C-extension imports (scipy.signal / numpy.fft / trimesh)
+from app.architectural_backend import ArchitecturalReconstructor, PRESET_CONDO_3F_2B  # noqa: E402,F401
+from app.da3_mps_backend import DA3MpsReconstructor  # noqa: E402,F401
+from app.reconstructor import select_reconstructor  # noqa: E402
+from app.schemas import ArchitecturalBuildingSpecModel, ReconstructionJob  # noqa: E402
+from app.synthetic_backend import SyntheticReconstructor  # noqa: E402,F401
+from app.video_keyframes import extract_sharp_keyframes  # noqa: E402
+
+logger = logging.getLogger("uvicorn.error")
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -38,10 +51,33 @@ def _default_jobs_root() -> Path:
     return (Path(__file__).resolve().parent.parent / "jobs_data").resolve()
 
 
+def _persist_job_state(job_dir: Path, job: ReconstructionJob) -> None:
+    try:
+        job_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = job_dir / "job.json.tmp"
+        final_path = job_dir / "job.json"
+        tmp_path.write_text(job.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(tmp_path, final_path)
+    except OSError:
+        pass
+
+
+def _load_persisted_job(jobs_root: Path, job_id: str) -> ReconstructionJob | None:
+    if not SAFE_JOB_ID_RE.match(job_id):
+        return None
+    job_file = (jobs_root / job_id / "job.json").resolve()
+    if not job_file.is_relative_to(jobs_root) or not job_file.is_file():
+        return None
+    try:
+        return ReconstructionJob.model_validate_json(job_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Lumen3D Multi-View 3D Reconstruction Worker",
-        version="0.2.0",
+        version="0.2.1",
     )
 
     app.add_middleware(
@@ -54,14 +90,50 @@ def create_app() -> FastAPI:
 
     jobs_lock = threading.Lock()
     jobs_store: dict[str, ReconstructionJob] = {}
-    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="recon-worker")
+    executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="recon-worker")
 
-    def _update_job(job_id: str, **updates: object) -> None:
+    def _save_job(job_dir: Path, job: ReconstructionJob) -> None:
+        with jobs_lock:
+            jobs_store[job.jobId] = job
+        _persist_job_state(job_dir, job)
+
+    def _update_job(job_id: str, job_dir: Path, **updates: object) -> None:
+        updated: ReconstructionJob | None = None
         with jobs_lock:
             current = jobs_store.get(job_id)
-            if current is None:
-                return
-            jobs_store[job_id] = current.model_copy(update=updates)
+            if current is not None:
+                updated = current.model_copy(update=updates)
+                jobs_store[job_id] = updated
+        if updated is not None:
+            _persist_job_state(job_dir, updated)
+
+    def _submit_job(
+        job_id: str,
+        mode: str,
+        input_files: list[Path],
+        job_dir: Path,
+        explicit_spec: dict[str, Any] | ArchitecturalBuildingSpecModel | None = None,
+    ) -> None:
+        fut = executor.submit(
+            _execute_job,
+            job_id,
+            mode,
+            input_files,
+            job_dir,
+            explicit_spec,
+        )
+
+        def _on_done(done_fut: Future[None]) -> None:
+            exc = done_fut.exception()
+            if exc is not None:
+                _update_job(
+                    job_id,
+                    job_dir,
+                    status="failed",
+                    error=str(exc) or exc.__class__.__name__,
+                )
+
+        fut.add_done_callback(_on_done)
 
     def _execute_job(
         job_id: str,
@@ -70,8 +142,9 @@ def create_app() -> FastAPI:
         job_dir: Path,
         explicit_spec: dict[str, Any] | ArchitecturalBuildingSpecModel | None = None,
     ) -> None:
+        t0 = time.perf_counter()
         try:
-            _update_job(job_id, status="processing", progress=10)
+            _update_job(job_id, job_dir, status="processing", progress=10)
             artifacts_dir = job_dir / "artifacts"
             artifacts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,21 +157,29 @@ def create_app() -> FastAPI:
                         video_path=path,
                         output_dir=keyframes_dir,
                         target_fps=2.0,
-                        max_frames=20,
+                        max_frames=16,
+                        progress_cb=lambda pct: _update_job(
+                            job_id, job_dir, progress=min(30, max(10, int(pct)))
+                        ),
                     )
                     resolved_images.extend(extracted)
                 elif suffix in IMAGE_EXTENSIONS:
                     resolved_images.append(path)
 
+            _update_job(job_id, job_dir, progress=30)
             reconstructor = select_reconstructor(mode=mode, explicit_spec=explicit_spec)
             result = reconstructor.reconstruct(
                 image_paths=resolved_images,
                 output_dir=artifacts_dir,
-                progress_cb=lambda pct: _update_job(job_id, progress=min(99, max(10, int(pct)))),
+                progress_cb=lambda pct: _update_job(
+                    job_id, job_dir, progress=min(99, max(30, int(pct)))
+                ),
             )
 
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
             _update_job(
                 job_id,
+                job_dir,
                 status="completed",
                 progress=100,
                 backendUsed=result.backend_used,
@@ -114,12 +195,24 @@ def create_app() -> FastAPI:
                 buildingSpec=result.building_spec,
                 error=None,
             )
-        except Exception as exc:
+            logger.info(
+                "[lumen3d:worker] job=%s completed backend=%s views=%d in %.1fms",
+                job_id,
+                result.backend_used,
+                len(resolved_images),
+                elapsed_ms,
+            )
+        except BaseException as exc:
+            err_msg = str(exc) or exc.__class__.__name__
             _update_job(
                 job_id,
+                job_dir,
                 status="failed",
-                error=str(exc),
+                error=err_msg,
             )
+            logger.error("[lumen3d:worker] job=%s failed: %s", job_id, err_msg)
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -135,8 +228,6 @@ def create_app() -> FastAPI:
         job_dir.mkdir(parents=True, exist_ok=True)
 
         if norm_preset == "condo":
-            from app.architectural_backend import PRESET_CONDO_3F_2B
-
             job = ReconstructionJob(
                 jobId=job_id,
                 status="queued",
@@ -144,10 +235,8 @@ def create_app() -> FastAPI:
                 mode="auto",
                 buildingSpec=PRESET_CONDO_3F_2B,
             )
-            with jobs_lock:
-                jobs_store[job_id] = job
-            executor.submit(
-                _execute_job,
+            _save_job(job_dir, job)
+            _submit_job(
                 job_id,
                 "architectural",
                 [],
@@ -162,10 +251,8 @@ def create_app() -> FastAPI:
             progress=0,
             mode="synthetic",
         )
-        with jobs_lock:
-            jobs_store[job_id] = job
-
-        executor.submit(_execute_job, job_id, "synthetic", [], job_dir, None)
+        _save_job(job_dir, job)
+        _submit_job(job_id, "synthetic", [], job_dir, None)
         return job
 
     @app.post("/jobs/reconstruct", response_model=ReconstructionJob)
@@ -174,9 +261,19 @@ def create_app() -> FastAPI:
         mode: str = Form(default=""),
         spec_json: str = Form(default=""),
     ) -> ReconstructionJob:
-        effective_mode_raw = (mode or os.environ.get("RECON_BACKEND") or "auto").strip().lower()
-        if effective_mode_raw not in ("auto", "da3", "vggt", "synthetic", "architectural"):
-            raise HTTPException(status_code=400, detail=f"Invalid mode: {effective_mode_raw}")
+        effective_mode_raw = (
+            mode or os.environ.get("RECON_BACKEND") or "auto"
+        ).strip().lower()
+        if effective_mode_raw not in (
+            "auto",
+            "da3",
+            "vggt",
+            "synthetic",
+            "architectural",
+        ):
+            raise HTTPException(
+                status_code=400, detail=f"Invalid mode: {effective_mode_raw}"
+            )
 
         parsed_spec: dict[str, Any] | None = None
         if spec_json and spec_json.strip():
@@ -186,7 +283,9 @@ def create_app() -> FastAPI:
                     raise ValueError("spec_json must be a JSON object")
                 parsed_spec = raw_obj
             except Exception as exc:
-                raise HTTPException(status_code=400, detail=f"Invalid spec_json: {exc}") from exc
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid spec_json: {exc}"
+                ) from exc
 
         if effective_mode_raw != "synthetic" and len(files) == 0 and parsed_spec is None:
             raise HTTPException(
@@ -225,11 +324,8 @@ def create_app() -> FastAPI:
             progress=0,
             mode=reported_mode,  # type: ignore[arg-type]
         )
-        with jobs_lock:
-            jobs_store[job_id] = job
-
-        executor.submit(
-            _execute_job,
+        _save_job(job_dir, job)
+        _submit_job(
             job_id,
             effective_mode_raw,
             saved_inputs,
@@ -243,6 +339,11 @@ def create_app() -> FastAPI:
         with jobs_lock:
             job = jobs_store.get(job_id)
         if job is None:
+            persisted = _load_persisted_job(_default_jobs_root(), job_id)
+            if persisted is not None:
+                with jobs_lock:
+                    jobs_store[job_id] = persisted
+                return persisted
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
         return job
 

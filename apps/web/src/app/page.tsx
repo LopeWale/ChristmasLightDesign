@@ -36,6 +36,7 @@ import {
 import { calibrateScaleFromDetection } from '@/lib/geometry/raycastCalibration';
 import {
   loadSamplePresetWithFallback,
+  pollReconstructionJob,
   resolveAddressLaunchAction,
 } from '@/lib/studioLaunchFlow';
 import { useStudioStore, type LightingMode } from '@/store/useStudioStore';
@@ -121,39 +122,22 @@ export default function HomePage() {
 
   const pollJobUntilComplete = useCallback(
     async (jobId: string, titleOverride?: string) => {
-      for (let attempt = 0; attempt < 180; attempt++) {
-        const resp = await fetch(
-          `/api/reconstruct?jobId=${encodeURIComponent(jobId)}`,
-          { cache: 'no-store' }
-        );
-        const data = await resp.json();
-        if (!resp.ok) {
-          throw new Error(data.error || 'Failed to poll reconstruction job');
-        }
-        const parsed = ReconstructionJobSchema.parse(data);
-        setJob(parsed, titleOverride);
+      const completed = await pollReconstructionJob(jobId, {
+        onProgress: (latest) => setJob(latest, titleOverride),
+      });
 
-        if (parsed.status === 'completed') {
-          if (parsed.camerasUrl) {
-            const camResp = await fetch(parsed.camerasUrl, { cache: 'no-store' });
-            if (camResp.ok) {
-              const camJson = await camResp.json();
-              const camPayload = CamerasPayloadSchema.parse(camJson);
-              setCameras(camPayload.cameras);
-            }
-          }
-          setReconstructing(false, null);
-          setLauncherModalOpen(false);
-          return;
+      if (completed.camerasUrl) {
+        const camResp = await fetch(completed.camerasUrl, {
+          cache: 'no-store',
+        });
+        if (camResp.ok) {
+          const camJson = await camResp.json();
+          const camPayload = CamerasPayloadSchema.parse(camJson);
+          setCameras(camPayload.cameras);
         }
-
-        if (parsed.status === 'failed') {
-          throw new Error(parsed.error || '3D reconstruction failed');
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      throw new Error('Timed out waiting for reconstruction job');
+      setReconstructing(false, null);
+      setLauncherModalOpen(false);
     },
     [setCameras, setJob, setReconstructing]
   );
@@ -626,6 +610,7 @@ export default function HomePage() {
             onUploadFiles={handleUploadFiles}
             onLoadSample={handleLoadSamplePreset}
             isBusy={isReconstructing}
+            progressPercent={isReconstructing && job ? job.progress : null}
             guideMessage={launcherGuide}
             errorMessage={reconError}
             canDismiss={sceneSource !== 'NONE'}

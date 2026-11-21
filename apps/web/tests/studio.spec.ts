@@ -212,3 +212,37 @@ test('E2E 3: Street Address Submit (1007 N Shartel Ave, Oklahoma City, OK) -> Ac
   await page.getByTestId('btn-guide-open-condo').click();
   await expect(page.getByTestId('floating-dock')).toBeVisible({ timeout: 15_000 });
 });
+
+test('E2E 4: Photo Upload Reconstruction (Architectural 3D & Neural Depth + Splat) -> Completes Fast Without Timeout', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // Create a valid 1x1 PNG buffer in memory? Better: use Playwright screenshot of canvas to get a crisp valid PNG!
+  const pngBuffer = await page.locator('body').screenshot({ type: 'png' });
+
+  // 1. Upload in Architectural 3D mode (default)
+  await page.getByTestId('input-upload-files').setInputFiles({
+    name: 'condo_front.png',
+    mimeType: 'image/png',
+    buffer: pngBuffer,
+  });
+
+  await expect(page.getByTestId('floating-dock')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('launcher-error')).toHaveCount(0);
+
+  // 2. Open Change Building modal, switch to Neural Depth + Splat (da3), and upload again
+  await page.getByTestId('btn-change-building').click();
+  await expect(page.getByTestId('studio-launcher')).toBeVisible();
+  await page.getByTestId('mode-da3').click();
+  await page.getByTestId('input-upload-files').setInputFiles({
+    name: 'condo_splat.png',
+    mimeType: 'image/png',
+    buffer: pngBuffer,
+  });
+
+  await expect(page.getByTestId('studio-launcher')).toHaveCount(0, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId('floating-dock')).toBeVisible();
+});
