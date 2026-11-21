@@ -1,0 +1,32 @@
+{
+  "type": "process",
+  "name": "Bambu P1S - Ceiling Light Bracket (4 Walls, 25% Gyroid, 0 Supports)",
+  "from": "User",
+  "inherits": "0.20mm Standard @BBL X1C",
+  "version": "1.9.0.0",
+  "print_settings_id": "Bambu P1S - Ceiling Light Bracket (4 Walls, 25% Gyroid, 0 Supports)",
+  "compatible_printers": [
+    "Bambu Lab P1S 0.4 nozzle",
+    "Bambu Lab P1P 0.4 nozzle",
+    "Bambu Lab X1 Carbon 0.4 nozzle",
+    "Bambu Lab A1 0.4 nozzle"
+  ],
+  "layer_height": "0.2",
+  "initial_layer_print_height": "0.2",
+  "wall_loops": "4",
+  "top_shell_layers": "5",
+  "bottom_shell_layers": "5",
+  "sparse_infill_density": "25%",
+  "sparse_infill_pattern": "gyroid",
+  "enable_support": "0",
+  "support_type": "normal(auto)",
+  "brim_type": "no_brim",
+  "brim_width": "0",
+  "elefant_foot_compensation": "0.15",
+  "wall_generator": "arachne",
+  "detect_thin_wall": "1",
+  "seam_position": "aligned",
+  "outer_wall_speed": "120",
+  "inner_wall_speed": "200",
+  "sparse_infill_speed": "230"
+}
