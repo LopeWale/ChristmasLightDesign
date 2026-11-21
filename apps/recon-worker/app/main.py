@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 from pathlib import Path
+import re
 import threading
+from typing import Any
 import uuid
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.reconstructor import select_reconstructor
-from app.schemas import ReconstructionJob, ReconstructionMode
+from app.schemas import ArchitecturalBuildingSpecModel, ReconstructionJob
 from app.video_keyframes import extract_sharp_keyframes
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SAFE_JOB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 ARTIFACT_MEDIA_TYPES = {
     ".glb": "model/gltf-binary",
@@ -36,7 +40,7 @@ def _default_jobs_root() -> Path:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Lumen3D Multi-View 3D Reconstruction Worker",
-        version="0.1.0",
+        version="0.2.0",
     )
 
     app.add_middleware(
@@ -60,9 +64,10 @@ def create_app() -> FastAPI:
 
     def _execute_job(
         job_id: str,
-        mode: ReconstructionMode,
+        mode: str,
         input_files: list[Path],
         job_dir: Path,
+        explicit_spec: dict[str, Any] | ArchitecturalBuildingSpecModel | None = None,
     ) -> None:
         try:
             _update_job(job_id, status="processing", progress=10)
@@ -70,10 +75,10 @@ def create_app() -> FastAPI:
             artifacts_dir.mkdir(parents=True, exist_ok=True)
 
             resolved_images: list[Path] = []
-            for path in input_files:
+            for idx, path in enumerate(input_files):
                 suffix = path.suffix.lower()
                 if suffix in VIDEO_EXTENSIONS:
-                    keyframes_dir = job_dir / "keyframes"
+                    keyframes_dir = job_dir / f"keyframes_{idx:02d}"
                     extracted = extract_sharp_keyframes(
                         video_path=path,
                         output_dir=keyframes_dir,
@@ -84,7 +89,7 @@ def create_app() -> FastAPI:
                 elif suffix in IMAGE_EXTENSIONS:
                     resolved_images.append(path)
 
-            reconstructor = select_reconstructor(mode)
+            reconstructor = select_reconstructor(mode=mode, explicit_spec=explicit_spec)
             result = reconstructor.reconstruct(
                 image_paths=resolved_images,
                 output_dir=artifacts_dir,
@@ -100,6 +105,7 @@ def create_app() -> FastAPI:
                 camerasUrl=f"/jobs/{job_id}/artifacts/{result.cameras_path.name}",
                 referenceImageUrl=f"/jobs/{job_id}/artifacts/{result.reference_image_path.name}",
                 meshStats=result.mesh_stats,
+                buildingSpec=result.building_spec,
                 error=None,
             )
         except Exception as exc:
@@ -115,11 +121,34 @@ def create_app() -> FastAPI:
         return {"status": "ok", "defaultMode": default_mode}
 
     @app.post("/jobs/demo", response_model=ReconstructionJob)
-    def start_demo_job() -> ReconstructionJob:
+    def start_demo_job(preset: str = Query(default="house")) -> ReconstructionJob:
+        norm_preset = (preset or "house").strip().lower()
         job_id = f"demo-{uuid.uuid4().hex[:10]}"
         jobs_root = _default_jobs_root()
         job_dir = jobs_root / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
+
+        if norm_preset == "condo":
+            from app.architectural_backend import PRESET_CONDO_3F_2B
+
+            job = ReconstructionJob(
+                jobId=job_id,
+                status="queued",
+                progress=0,
+                mode="auto",
+                buildingSpec=PRESET_CONDO_3F_2B,
+            )
+            with jobs_lock:
+                jobs_store[job_id] = job
+            executor.submit(
+                _execute_job,
+                job_id,
+                "architectural",
+                [],
+                job_dir,
+                PRESET_CONDO_3F_2B,
+            )
+            return job
 
         job = ReconstructionJob(
             jobId=job_id,
@@ -130,23 +159,33 @@ def create_app() -> FastAPI:
         with jobs_lock:
             jobs_store[job_id] = job
 
-        executor.submit(_execute_job, job_id, "synthetic", [], job_dir)
+        executor.submit(_execute_job, job_id, "synthetic", [], job_dir, None)
         return job
 
     @app.post("/jobs/reconstruct", response_model=ReconstructionJob)
     async def start_reconstruct_job(
         files: list[UploadFile] = File(default=[]),
         mode: str = Form(default=""),
+        spec_json: str = Form(default=""),
     ) -> ReconstructionJob:
         effective_mode_raw = (mode or os.environ.get("RECON_BACKEND") or "auto").strip().lower()
-        if effective_mode_raw not in ("auto", "vggt", "synthetic"):
+        if effective_mode_raw not in ("auto", "vggt", "synthetic", "architectural"):
             raise HTTPException(status_code=400, detail=f"Invalid mode: {effective_mode_raw}")
-        effective_mode: ReconstructionMode = effective_mode_raw  # type: ignore[assignment]
 
-        if effective_mode != "synthetic" and len(files) == 0:
+        parsed_spec: dict[str, Any] | None = None
+        if spec_json and spec_json.strip():
+            try:
+                raw_obj = json.loads(spec_json)
+                if not isinstance(raw_obj, dict):
+                    raise ValueError("spec_json must be a JSON object")
+                parsed_spec = raw_obj
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid spec_json: {exc}") from exc
+
+        if effective_mode_raw != "synthetic" and len(files) == 0 and parsed_spec is None:
             raise HTTPException(
                 status_code=400,
-                detail="At least one image (JPEG/PNG/WEBP) or walkaround video (.mp4/.mov) is required.",
+                detail="At least one image (JPEG/PNG/WEBP), walkaround video (.mp4/.mov), or spec_json is required.",
             )
 
         job_id = f"recon-{uuid.uuid4().hex[:10]}"
@@ -169,16 +208,28 @@ def create_app() -> FastAPI:
             dest.write_bytes(content)
             saved_inputs.append(dest)
 
+        reported_mode = (
+            "auto"
+            if effective_mode_raw == "architectural"
+            else effective_mode_raw  # type: ignore[assignment]
+        )
         job = ReconstructionJob(
             jobId=job_id,
             status="queued",
             progress=0,
-            mode=effective_mode,
+            mode=reported_mode,  # type: ignore[arg-type]
         )
         with jobs_lock:
             jobs_store[job_id] = job
 
-        executor.submit(_execute_job, job_id, effective_mode, saved_inputs, job_dir)
+        executor.submit(
+            _execute_job,
+            job_id,
+            effective_mode_raw,
+            saved_inputs,
+            job_dir,
+            parsed_spec,
+        )
         return job
 
     @app.get("/jobs/{job_id}", response_model=ReconstructionJob)
@@ -191,13 +242,15 @@ def create_app() -> FastAPI:
 
     @app.get("/jobs/{job_id}/artifacts/{filename}")
     def get_job_artifact(job_id: str, filename: str) -> FileResponse:
+        if not SAFE_JOB_ID_RE.match(job_id):
+            raise HTTPException(status_code=400, detail="Invalid job identifier")
         safe_name = Path(filename).name
         if safe_name != filename or ".." in filename:
             raise HTTPException(status_code=400, detail="Invalid artifact filename")
 
         jobs_root = _default_jobs_root()
         artifact_path = (jobs_root / job_id / "artifacts" / safe_name).resolve()
-        if not str(artifact_path).startswith(str(jobs_root)) or not artifact_path.is_file():
+        if not artifact_path.is_relative_to(jobs_root) or not artifact_path.is_file():
             raise HTTPException(status_code=404, detail="Artifact not found")
 
         media_type = ARTIFACT_MEDIA_TYPES.get(
