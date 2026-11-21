@@ -392,6 +392,7 @@ export async function GET(request: Request): Promise<Response> {
         status: 200,
         headers: {
           'Content-Type': contentType,
+          'Content-Length': String(arrayBuffer.byteLength),
           'Cache-Control': 'no-store',
         },
       });

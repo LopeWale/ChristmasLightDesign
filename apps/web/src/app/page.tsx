@@ -59,6 +59,7 @@ export default function HomePage() {
   const sceneSource = useStudioStore((s) => s.sceneSource);
   const sceneTitle = useStudioStore((s) => s.sceneTitle);
   const proceduralPreset = useStudioStore((s) => s.proceduralPreset);
+  const proceduralSpec = useStudioStore((s) => s.proceduralSpec);
   const activeDrawer = useStudioStore((s) => s.activeDrawer);
   const lightingMode = useStudioStore((s) => s.lightingMode);
   const job = useStudioStore((s) => s.job);
@@ -101,13 +102,14 @@ export default function HomePage() {
     [runs, feetPerSceneUnit, calibrationSource, groundMinY]
   );
 
-  // Active editable buildingSpec (either from worker job or instant client procedural condo/house)
+  // Active editable buildingSpec (either from worker job, edited procedural spec, or default preset)
   const activeBuildingSpec: ArchitecturalBuildingSpec | null = useMemo(() => {
     if (job?.buildingSpec) return job.buildingSpec;
+    if (proceduralSpec) return proceduralSpec;
     if (proceduralPreset === 'condo') return CLIENT_CONDO_SPEC;
     if (proceduralPreset === 'house') return CLIENT_HOUSE_SPEC;
     return null;
-  }, [job?.buildingSpec, proceduralPreset]);
+  }, [job?.buildingSpec, proceduralSpec, proceduralPreset]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -222,20 +224,18 @@ export default function HomePage() {
         body: JSON.stringify({ buildingSpec: spec }),
       });
       if (!resp.ok) {
-        // Offline worker: rebuild procedurally on client
         const built = buildClientProceduralBuilding(spec);
         setCameras(built.cameras);
-        setProceduralScene(
-          spec.floors >= 3 ? 'condo' : 'house',
-          spec.sourceSummary
-        );
+        setProceduralScene(spec, spec.sourceSummary);
         return;
       }
       const initialJob = ReconstructionJobSchema.parse(await resp.json());
       setJob(initialJob, spec.sourceSummary);
       await pollJobUntilComplete(initialJob.jobId, spec.sourceSummary);
     } catch {
-      setReconstructing(false, null);
+      const built = buildClientProceduralBuilding(spec);
+      setCameras(built.cameras);
+      setProceduralScene(spec, spec.sourceSummary);
     }
   };
 
@@ -365,6 +365,14 @@ export default function HomePage() {
     }
   }, []);
 
+  const handleSceneReady = useCallback((group: THREE.Group) => {
+    sceneGroupRef.current = group;
+  }, []);
+
+  const handleRegisterScreenshot = useCallback((fn: () => string) => {
+    screenshotFnRef.current = fn;
+  }, []);
+
   const showLauncher = sceneSource === 'NONE' || launcherModalOpen;
 
   return (
@@ -372,12 +380,8 @@ export default function HomePage() {
       {/* 100% Full-Bleed 3D Spatial Viewport */}
       <div className="fixed inset-0">
         <StudioViewport
-          onSceneReady={(group) => {
-            sceneGroupRef.current = group;
-          }}
-          onRegisterScreenshot={(fn) => {
-            screenshotFnRef.current = fn;
-          }}
+          onSceneReady={handleSceneReady}
+          onRegisterScreenshot={handleRegisterScreenshot}
         />
       </div>
 
@@ -572,11 +576,11 @@ export default function HomePage() {
           {/* Bottom-Center Pascal-Style Floating Tool Dock */}
           <FloatingDock />
 
-          {/* Responsive High-Contrast Dark Obsidian Telemetry Pill (single DOM instance; shifts left when right drawer opens) */}
+          {/* Responsive High-Contrast Dark Obsidian Telemetry Pill (single DOM instance; sits bottom-left clear of top popovers when right drawer opens) */}
           <div
             className={`pointer-events-none fixed z-20 w-[330px] max-w-[calc(100vw-2rem)] transition-all ${
               activeDrawer !== 'NONE'
-                ? 'left-4 top-16'
+                ? 'bottom-24 left-4'
                 : 'right-4 top-16 xl:bottom-5 xl:right-4 xl:top-auto'
             }`}
           >

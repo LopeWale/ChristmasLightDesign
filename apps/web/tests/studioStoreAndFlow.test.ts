@@ -1,8 +1,11 @@
 import { describe, expect, it, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   resolveAddressLaunchAction,
   loadSamplePresetWithFallback,
 } from '../src/lib/studioLaunchFlow';
+import { GET as reconstructGet } from '../src/app/api/reconstruct/route';
 import { useStudioStore } from '../src/store/useStudioStore';
 
 describe('Task 4: Progressive Studio Launch Flow & Zero-Failure Fallback', () => {
@@ -114,5 +117,33 @@ describe('Task 4: Progressive Studio Launch Flow & Zero-Failure Fallback', () =>
     );
     expect(outcome.kind).toBe('CLIENT_PROCEDURAL');
     expect(outcome.preset).toBe('condo');
+  });
+
+  it('sets explicit Content-Length header on GET /api/reconstruct?artifact=scene.splat and bundles local Draco decoders', async () => {
+    const origFetch = globalThis.fetch;
+    const splatPayload = new Uint8Array(64);
+    globalThis.fetch = (async () =>
+      new Response(splatPayload, {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      })) as typeof fetch;
+
+    try {
+      const resp = await reconstructGet(
+        new Request(
+          'http://localhost:3000/api/reconstruct?jobId=job-1&artifact=scene.splat'
+        )
+      );
+      expect(resp.status).toBe(200);
+      expect(resp.headers.get('content-length')).toBe('64');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+
+    const dracoWasm = path.resolve(
+      __dirname,
+      '../public/draco/draco_decoder.wasm'
+    );
+    expect(fs.existsSync(dracoWasm)).toBe(true);
   });
 });

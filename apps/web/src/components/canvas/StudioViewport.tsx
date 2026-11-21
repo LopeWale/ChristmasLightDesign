@@ -186,6 +186,23 @@ const SURFACE_LABELS: Record<string, string> = {
   unknown: 'Exterior Surface',
 };
 
+class SplatErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { failed: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
+
 export function StudioViewport({
   onSceneReady,
   onRegisterScreenshot,
@@ -193,6 +210,7 @@ export function StudioViewport({
   const sceneSource = useStudioStore((s) => s.sceneSource);
   const tilesAnchor = useStudioStore((s) => s.tilesAnchor);
   const proceduralPreset = useStudioStore((s) => s.proceduralPreset);
+  const proceduralSpec = useStudioStore((s) => s.proceduralSpec);
   const job = useStudioStore((s) => s.job);
   const lightingMode = useStudioStore((s) => s.lightingMode);
   const toolMode = useStudioStore((s) => s.toolMode);
@@ -371,7 +389,13 @@ export function StudioViewport({
               onSceneLoaded={handleMeshLoaded}
               onHoverHit={setHoverHit}
             />
-            {job.splatUrl && <Splat src={job.splatUrl} />}
+            {job.splatUrl && (
+              <SplatErrorBoundary>
+                <React.Suspense fallback={null}>
+                  <Splat src={job.splatUrl} />
+                </React.Suspense>
+              </SplatErrorBoundary>
+            )}
             <ContactShadows
               position={[0, 0.01, 0]}
               opacity={lightingMode === 'NIGHT' ? 0.35 : 0.5}
@@ -382,14 +406,16 @@ export function StudioViewport({
           </>
         )}
 
-        {sceneSource === 'MESH_RECON' && !job?.glbUrl && proceduralPreset && (
-          <>
-            <ProceduralBuildingMesh
-              presetOrSpec={proceduralPreset}
-              lightingMode={lightingMode}
-              onSceneLoaded={handleMeshLoaded}
-              onHoverHit={setHoverHit}
-            />
+        {sceneSource === 'MESH_RECON' &&
+          !job?.glbUrl &&
+          (proceduralSpec || proceduralPreset) && (
+            <>
+              <ProceduralBuildingMesh
+                presetOrSpec={(proceduralSpec || proceduralPreset)!}
+                lightingMode={lightingMode}
+                onSceneLoaded={handleMeshLoaded}
+                onHoverHit={setHoverHit}
+              />
             <ContactShadows
               position={[0, 0.01, 0]}
               opacity={lightingMode === 'NIGHT' ? 0.35 : 0.5}

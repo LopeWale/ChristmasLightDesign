@@ -1,17 +1,24 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import {
   TilesRenderer,
   TilesPlugin,
   TilesAttributionOverlay,
 } from '3d-tiles-renderer/r3f';
+import { GoogleCloudAuthPlugin } from '3d-tiles-renderer/core/plugins';
 import {
-  GoogleCloudAuthPlugin,
+  GLTFExtensionsPlugin,
   ReorientationPlugin,
-} from '3d-tiles-renderer/plugins';
-import type { LightingMode, TilesAnchor } from '@/store/useStudioStore';
+} from '3d-tiles-renderer/three/plugins';
+import { computeTilesGroundLevelOffset } from '@/lib/geometry/proceduralBuilding';
+import {
+  useStudioStore,
+  type LightingMode,
+  type TilesAnchor,
+} from '@/store/useStudioStore';
 import {
   useSurfacePointerHandlers,
   type HoverHitInfo,
@@ -48,7 +55,28 @@ export function PhotorealisticTilesScene({
     new WeakMap()
   );
   const loadedMaterialsRef = useRef<Set<THREE.Material>>(new Set());
+  const leveledOnceRef = useRef<boolean>(false);
+  const [levelOffsetY, setLevelOffsetY] = useState<number>(0);
+
+  const setMapsStatus = useStudioStore((s) => s.setMapsStatus);
   const handlers = useSurfacePointerHandlers(onHoverHit);
+
+  useEffect(() => {
+    leveledOnceRef.current = false;
+    setLevelOffsetY(0);
+  }, [anchor.lat, anchor.lng, anchor.height]);
+
+  const dracoLoader = useMemo(() => {
+    const loader = new DRACOLoader();
+    loader.setDecoderPath('/draco/');
+    return loader;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      dracoLoader.dispose();
+    };
+  }, [dracoLoader]);
 
   const rootUrl = useMemo(() => {
     const origin =
@@ -67,6 +95,16 @@ export function PhotorealisticTilesScene({
       },
     ],
     []
+  );
+
+  const gltfExtArgs = useMemo(
+    () => [
+      {
+        dracoLoader,
+        autoDispose: false,
+      },
+    ],
+    [dracoLoader]
   );
 
   const reorientArgs = useMemo(
@@ -119,11 +157,46 @@ export function PhotorealisticTilesScene({
           }
         }
       });
-      if (tilesRef.current?.group && onSceneReady) {
-        onSceneReady(tilesRef.current.group as THREE.Group);
+
+      const rootGroup = tilesRef.current?.group as THREE.Group | undefined;
+      if (rootGroup) {
+        if (!leveledOnceRef.current) {
+          rootGroup.updateMatrixWorld(true);
+          const deltaY = computeTilesGroundLevelOffset(rootGroup);
+          if (deltaY !== null && Math.abs(deltaY) < 900) {
+            leveledOnceRef.current = true;
+            setLevelOffsetY(deltaY);
+          }
+        }
+        onSceneReady?.(rootGroup);
       }
     },
     [applyTintToMaterial, lightingMode, onSceneReady]
+  );
+
+  const handleDisposeModel = useCallback(
+    ({ scene }: { scene: THREE.Object3D }) => {
+      scene.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          const rawMat = (obj as THREE.Mesh).material;
+          const mats = Array.isArray(rawMat) ? rawMat : [rawMat];
+          for (const mat of mats) {
+            if (mat) loadedMaterialsRef.current.delete(mat);
+          }
+        }
+      });
+    },
+    []
+  );
+
+  const handleLoadError = useCallback(
+    ({ error }: { error?: Error }) => {
+      setMapsStatus('Map data © Google', [
+        error?.message ||
+          'Photorealistic 3D Tiles failed to stream—verify Map Tiles API is enabled on GOOGLE_MAPS_API_KEY.',
+      ]);
+    },
+    [setMapsStatus]
   );
 
   useEffect(() => {
@@ -133,23 +206,29 @@ export function PhotorealisticTilesScene({
   }, [lightingMode, applyTintToMaterial]);
 
   return (
-    <group {...handlers}>
+    <group position={[0, levelOffsetY, 0]} {...handlers}>
       <TilesRenderer
         ref={tilesRef}
         url={rootUrl}
+        accelerateRaycast={false}
         onLoadModel={handleLoadModel}
+        onDisposeModel={handleDisposeModel}
+        onLoadError={handleLoadError}
       >
         <TilesPlugin plugin={GoogleCloudAuthPlugin} args={authArgs} />
+        <TilesPlugin plugin={GLTFExtensionsPlugin} args={gltfExtArgs} />
         <TilesPlugin plugin={ReorientationPlugin} args={reorientArgs} />
         <TilesAttributionOverlay
           style={{
-            left: 'auto',
-            right: '16px',
-            bottom: '12px',
-            background: 'rgba(2, 6, 23, 0.82)',
+            left: '108px',
+            right: 'auto',
+            bottom: '10px',
+            maxWidth: '280px',
+            background: 'rgba(5, 8, 20, 0.9)',
             borderRadius: '8px',
             padding: '4px 10px',
             backdropFilter: 'blur(8px)',
+            zIndex: 15,
           }}
         />
       </TilesRenderer>

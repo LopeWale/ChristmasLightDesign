@@ -80,3 +80,16 @@ def test_dev_worker_bootstrap_script_resolves_python_with_unrelated_virtual_env(
     )
     assert proc.returncode == 0, f"stderr={proc.stderr} stdout={proc.stdout}"
     assert "python" in proc.stdout.lower()
+
+
+def test_encode_32byte_splat_negates_y_and_z_for_drei_splat_loader():
+    from app.da3_mps_backend import encode_32byte_splat_buffer
+
+    pts = np.array([[1.5, 4.0, 2.5]], dtype=np.float32)
+    scales = np.array([[0.1, 0.1, 0.1]], dtype=np.float32)
+    rgba = np.array([[200, 150, 100, 255]], dtype=np.uint8)
+    buf = encode_32byte_splat_buffer(pts, scales, rgba)
+    floats = np.frombuffer(buf[:12], dtype="<f4")
+    # @react-three/drei SplatLoader negates Y and Z on load; stored buffer must be (x, -y, -z)
+    assert np.allclose(floats, [1.5, -4.0, -2.5], atol=1e-4)
+

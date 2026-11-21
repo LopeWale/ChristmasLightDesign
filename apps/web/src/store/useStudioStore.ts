@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import {
   BULB_PRESET_SPECS,
   ProjectExportSchema,
+  type ArchitecturalBuildingSpec,
   type BulbPreset,
   type CalibrationSource,
   type CameraPose,
@@ -40,6 +41,7 @@ export interface StudioState {
   sceneTitle: string;
   tilesAnchor: TilesAnchor | null;
   proceduralPreset: 'condo' | 'house' | null;
+  proceduralSpec: ArchitecturalBuildingSpec | null;
   activeDrawer: ActiveDrawer;
   job: ReconstructionJob | null;
   cameras: CameraPose[];
@@ -87,7 +89,10 @@ export interface StudioState {
   // Actions — Scene & Calibration
   setJob: (job: ReconstructionJob | null, title?: string) => void;
   setTilesScene: (title: string, anchor: TilesAnchor) => void;
-  setProceduralScene: (preset: 'condo' | 'house', title?: string) => void;
+  setProceduralScene: (
+    presetOrSpec: 'condo' | 'house' | ArchitecturalBuildingSpec,
+    title?: string
+  ) => void;
   resetToLauncher: () => void;
   setActiveDrawer: (drawer: ActiveDrawer) => void;
   setCameras: (cameras: CameraPose[]) => void;
@@ -194,6 +199,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   sceneTitle: '',
   tilesAnchor: null,
   proceduralPreset: null,
+  proceduralSpec: null,
   activeDrawer: 'NONE',
   job: null,
   cameras: [],
@@ -235,6 +241,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set((state) => ({
       job,
       proceduralPreset: null,
+      proceduralSpec: null,
       tilesAnchor: null,
       sceneSource:
         job && (job.status === 'completed' || state.sceneSource !== 'NONE')
@@ -251,6 +258,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       sceneTitle,
       tilesAnchor,
       proceduralPreset: null,
+      proceduralSpec: null,
       job: null,
       groundMinY: 0,
       feetPerSceneUnit: DEFAULT_FEET_PER_SCENE_UNIT,
@@ -258,15 +266,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       isReconstructing: false,
       reconError: null,
     }),
-  setProceduralScene: (preset, title) =>
+  setProceduralScene: (presetOrSpec, title) => {
+    const isString = typeof presetOrSpec === 'string';
+    const preset: 'condo' | 'house' = isString
+      ? presetOrSpec
+      : presetOrSpec.floors >= 3
+        ? 'condo'
+        : 'house';
     set({
       sceneSource: 'MESH_RECON',
       sceneTitle:
         title ||
-        (preset === 'condo'
-          ? '3-Story Condo · 2 Balconies'
-          : 'Suburban Gable Residence'),
+        (!isString
+          ? presetOrSpec.sourceSummary
+          : preset === 'condo'
+            ? '3-Story Condo · 2 Balconies'
+            : 'Suburban Gable Residence'),
       proceduralPreset: preset,
+      proceduralSpec: isString ? null : presetOrSpec,
       tilesAnchor: null,
       job: null,
       groundMinY: 0,
@@ -274,13 +291,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       calibrationSource: 'AUTO_DOOR',
       isReconstructing: false,
       reconError: null,
-    }),
+    });
+  },
   resetToLauncher: () =>
     set({
       sceneSource: 'NONE',
       sceneTitle: '',
       tilesAnchor: null,
       proceduralPreset: null,
+      proceduralSpec: null,
       activeDrawer: 'NONE',
       job: null,
       isReconstructing: false,

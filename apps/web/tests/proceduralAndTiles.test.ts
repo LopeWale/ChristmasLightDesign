@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import {
   buildClientProceduralBuilding,
   classifyHitSurfaceMaterial,
+  computeTilesGroundLevelOffset,
+  CLIENT_CONDO_SPEC,
 } from '../src/lib/geometry/proceduralBuilding';
 import { useStudioStore } from '../src/store/useStudioStore';
 
@@ -113,5 +115,72 @@ describe('Task 3: Client Procedural Fallback, 3D Tile Surface Classifier & Scene
     useStudioStore.getState().resetToLauncher();
     expect(useStudioStore.getState().sceneSource).toBe('NONE');
     expect(useStudioStore.getState().activeDrawer).toBe('NONE');
+  });
+
+  it('classifies ground-level unnamed vertical walls as brick_masonry and 1.4m porch roofs as asphalt_shingle', () => {
+    expect(
+      classifyHitSurfaceMaterial(
+        'tile_8821_primitive_0',
+        new THREE.Vector3(1.0, 0.5, 4.8),
+        new THREE.Vector3(0, 0.02, 0.99)
+      )
+    ).toBe('brick_masonry');
+
+    expect(
+      classifyHitSurfaceMaterial(
+        'tile_8821_primitive_0',
+        new THREE.Vector3(0.0, 1.4, 4.0),
+        new THREE.Vector3(0, 0.88, 0.47)
+      )
+    ).toBe('asphalt_shingle');
+  });
+
+  it('persists custom ArchitecturalBuildingSpec across offline setProceduralScene and builds left/right/rear balconies', () => {
+    const customSpec = {
+      ...CLIENT_CONDO_SPEC,
+      floors: 5,
+      balconies: [
+        {
+          id: 'left-bal',
+          floor: 4,
+          wallFace: 'left' as const,
+          centerOffsetNorm: 0,
+          widthMeters: 3.0,
+          depthMeters: 1.4,
+          mountStyle: 'cantilevered' as const,
+          railingType: 'solid_parapet' as const,
+        },
+      ],
+    };
+
+    const built = buildClientProceduralBuilding(customSpec);
+    let railBox = new THREE.Box3();
+    built.group.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh && obj.name.includes('balcony_railing_0')) {
+        railBox.expandByObject(obj);
+      }
+    });
+    // Left wall sits at minX = -6.2, so left balcony extends past x < -6.2
+    expect(railBox.min.x).toBeLessThan(-6.5);
+
+    useStudioStore.getState().setProceduralScene(customSpec, 'Custom 5F Condo');
+    expect(useStudioStore.getState().proceduralSpec?.floors).toBe(5);
+  });
+
+  it('computes auto-leveling ground Y offset from raycast hits against geoid-offset 3D tile meshes', () => {
+    // Simulate a 3D tile ground plane shifted to y = -28.5m due to EGM96 geoid undulation
+    const group = new THREE.Group();
+    const groundGeom = new THREE.BoxGeometry(60, 0.5, 60);
+    const groundMesh = new THREE.Mesh(groundGeom, new THREE.MeshBasicMaterial());
+    groundMesh.position.set(0, -28.75, 0); // top surface at y = -28.5
+    group.add(groundMesh);
+    const bldgGeom = new THREE.BoxGeometry(12, 10, 10);
+    const bldgMesh = new THREE.Mesh(bldgGeom, new THREE.MeshBasicMaterial());
+    bldgMesh.position.set(0, -23.5, 0); // roof at -18.5, street around it at -28.5
+    group.add(bldgMesh);
+    group.updateMatrixWorld(true);
+
+    const deltaY = computeTilesGroundLevelOffset(group);
+    expect(deltaY).toBeCloseTo(28.5, 1);
   });
 });

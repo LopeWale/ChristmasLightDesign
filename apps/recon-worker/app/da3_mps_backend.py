@@ -89,7 +89,11 @@ def encode_32byte_splat_buffer(
         ]
     )
     records = np.empty(n, dtype=dtype)
-    records["pos"] = np.asarray(positions, dtype=np.float32)
+    pos_cv = np.asarray(positions, dtype=np.float32).copy()
+    # @react-three/drei <Splat> (antimatter15) negates Y and Z on load; store (x, -y, -z)
+    pos_cv[:, 1] *= -1.0
+    pos_cv[:, 2] *= -1.0
+    records["pos"] = pos_cv
     records["scale"] = np.asarray(scales, dtype=np.float32)
     records["rgba"] = np.clip(rgba, 0, 255).astype(np.uint8)
     records["rot"] = np.tile(np.array([255, 128, 128, 128], dtype=np.uint8), (n, 1))

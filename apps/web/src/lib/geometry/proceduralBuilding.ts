@@ -56,13 +56,39 @@ export function classifyHitSurfaceMaterial(
   if (worldNormal.y >= 0.65 && localPoint.y < 0.85) {
     return 'ground_turf';
   }
-  if (worldNormal.y >= 0.45 && localPoint.y >= 2.1) {
+  if (worldNormal.y >= 0.45 && localPoint.y >= 0.85) {
     return 'asphalt_shingle';
   }
-  if (Math.abs(worldNormal.y) < 0.45 && localPoint.y < 1.1) {
-    return 'foliage_shrub';
-  }
   return 'brick_masonry';
+}
+
+export function computeTilesGroundLevelOffset(
+  tilesGroup: THREE.Object3D
+): number | null {
+  const raycaster = new THREE.Raycaster();
+  const down = new THREE.Vector3(0, -1, 0);
+  const sampleXZ: Array<[number, number]> = [
+    [0, 0],
+    [-14, -14],
+    [14, -14],
+    [-14, 14],
+    [14, 14],
+    [0, 18],
+    [0, -18],
+  ];
+  const hitYs: number[] = [];
+
+  for (const [sx, sz] of sampleXZ) {
+    raycaster.set(new THREE.Vector3(sx, 1200, sz), down);
+    const hits = raycaster.intersectObject(tilesGroup, true);
+    if (hits.length > 0 && Number.isFinite(hits[0].point.y)) {
+      hitYs.push(hits[0].point.y);
+    }
+  }
+
+  if (hitYs.length === 0) return null;
+  const groundY = Math.min(...hitYs);
+  return -groundY;
 }
 
 export const CLIENT_CONDO_SPEC: ArchitecturalBuildingSpec = {
@@ -398,21 +424,70 @@ export function buildClientProceduralBuilding(
     }
   }
 
-  // 6. Walk-out Balconies (slab, ceiling soffits, 42-inch 3D railings)
+  // 6. Walk-out Balconies (slab, ceiling soffits, 42-inch 3D railings across all 4 wall faces)
+  const depthM = Math.max(6.0, maxZ - minZ);
   spec.balconies.forEach((bal, idx) => {
     if (bal.floor > spec.floors) return;
     const yDeck = (bal.floor - 1) * spec.metersPerFloor;
     const yCeil = bal.floor * spec.metersPerFloor;
-    const cx = bal.centerOffsetNorm * widthM;
     const hw = 0.5 * bal.widthMeters;
-    const depth = bal.mountStyle === 'cantilevered' ? bal.depthMeters : bal.depthMeters * 0.65;
+    const depth =
+      bal.mountStyle === 'cantilevered' ? bal.depthMeters : bal.depthMeters * 0.65;
     const railH = 1.07;
+    const railColor = bal.railingType === 'glass_panel' ? '#88b8d8' : '#2a303c';
+
+    if (bal.wallFace === 'left' || bal.wallFace === 'right') {
+      const cz = bal.centerOffsetNorm * depthM;
+      const x0 = bal.wallFace === 'left' ? minX - depth : maxX - 0.04;
+      const x1 = bal.wallFace === 'left' ? minX + 0.04 : maxX + depth;
+      const outerX0 = bal.wallFace === 'left' ? minX - depth : maxX + depth - 0.07;
+      const outerX1 = bal.wallFace === 'left' ? minX - depth + 0.07 : maxX + depth;
+
+      group.add(
+        makeBoxMesh(
+          `balcony_slab_${idx}`,
+          [x0, yDeck - 0.08, cz - hw],
+          [x1, yDeck + 0.1, cz + hw],
+          trimColor,
+          0.76,
+          0.06
+        )
+      );
+      group.add(
+        makeBoxMesh(
+          `balcony_soffit_${idx}`,
+          [x0, yCeil - 0.14, cz - hw],
+          [x1, yCeil - 0.02, cz + hw],
+          trimColor,
+          0.8,
+          0.04
+        )
+      );
+      group.add(
+        makeBoxMesh(
+          `balcony_railing_${idx}_outer`,
+          [outerX0, yDeck + 0.1, cz - hw],
+          [outerX1, yDeck + 0.1 + railH, cz + hw],
+          railColor,
+          0.4,
+          0.55
+        )
+      );
+      return;
+    }
+
+    const cx = bal.centerOffsetNorm * widthM;
+    const isRear = bal.wallFace === 'rear';
+    const z0 = isRear ? minZ - depth : maxZ - 0.04;
+    const z1 = isRear ? minZ + 0.04 : maxZ + depth;
+    const outerZ0 = isRear ? minZ - depth : maxZ + depth - 0.07;
+    const outerZ1 = isRear ? minZ - depth + 0.07 : maxZ + depth;
 
     group.add(
       makeBoxMesh(
         `balcony_slab_${idx}`,
-        [cx - hw, yDeck - 0.08, maxZ - 0.04],
-        [cx + hw, yDeck + 0.1, maxZ + depth],
+        [cx - hw, yDeck - 0.08, z0],
+        [cx + hw, yDeck + 0.1, z1],
         trimColor,
         0.76,
         0.06
@@ -421,21 +496,18 @@ export function buildClientProceduralBuilding(
     group.add(
       makeBoxMesh(
         `balcony_soffit_${idx}`,
-        [cx - hw, yCeil - 0.14, maxZ],
-        [cx + hw, yCeil - 0.02, maxZ + depth * 0.96],
+        [cx - hw, yCeil - 0.14, z0],
+        [cx + hw, yCeil - 0.02, z1],
         trimColor,
         0.8,
         0.04
       )
     );
-
-    const railColor = bal.railingType === 'glass_panel' ? '#88b8d8' : '#2a303c';
-    // Front & side top guardrails (`balcony_railing` surface material)
     group.add(
       makeBoxMesh(
         `balcony_railing_${idx}_front`,
-        [cx - hw, yDeck + 0.1, maxZ + depth - 0.07],
-        [cx + hw, yDeck + 0.1 + railH, maxZ + depth],
+        [cx - hw, yDeck + 0.1, outerZ0],
+        [cx + hw, yDeck + 0.1 + railH, outerZ1],
         railColor,
         0.4,
         0.55
@@ -444,8 +516,8 @@ export function buildClientProceduralBuilding(
     group.add(
       makeBoxMesh(
         `balcony_railing_${idx}_left`,
-        [cx - hw, yDeck + 0.1, maxZ],
-        [cx - hw + 0.07, yDeck + 0.1 + railH, maxZ + depth],
+        [cx - hw, yDeck + 0.1, z0],
+        [cx - hw + 0.07, yDeck + 0.1 + railH, z1],
         railColor,
         0.4,
         0.55
@@ -454,8 +526,8 @@ export function buildClientProceduralBuilding(
     group.add(
       makeBoxMesh(
         `balcony_railing_${idx}_right`,
-        [cx + hw - 0.07, yDeck + 0.1, maxZ],
-        [cx + hw, yDeck + 0.1 + railH, maxZ + depth],
+        [cx + hw - 0.07, yDeck + 0.1, z0],
+        [cx + hw, yDeck + 0.1 + railH, z1],
         railColor,
         0.4,
         0.55
