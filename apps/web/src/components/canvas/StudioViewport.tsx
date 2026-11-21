@@ -25,6 +25,33 @@ function CanvasScreenshotRegistrar({
   return null;
 }
 
+function CameraBoundsFitter({
+  fitBounds,
+  orbitTarget,
+}: {
+  fitBounds: THREE.Box3 | null;
+  orbitTarget: [number, number, number];
+}) {
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (!fitBounds) return;
+    const size = new THREE.Vector3();
+    fitBounds.getSize(size);
+    const height = Math.max(4.0, size.y);
+    const dist = Math.max(13.8, height * 1.65);
+    camera.position.set(
+      orbitTarget[0] + 0.3,
+      Math.max(3.6, height * 0.52),
+      orbitTarget[2] + dist
+    );
+    camera.lookAt(orbitTarget[0], orbitTarget[1], orbitTarget[2]);
+    camera.updateProjectionMatrix();
+  }, [fitBounds, orbitTarget, camera]);
+
+  return null;
+}
+
 function SceneLightingRig({ lightingMode }: { lightingMode: LightingMode }) {
   if (lightingMode === 'DAY') {
     return (
@@ -113,6 +140,10 @@ export function StudioViewport({
   const setGroundMinY = useStudioStore((s) => s.setGroundMinY);
 
   const [hoverHit, setHoverHit] = useState<HoverHitInfo | null>(null);
+  const [fitBounds, setFitBounds] = useState<THREE.Box3 | null>(null);
+  const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([
+    1.6, 2.0, 1.5,
+  ]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Keyboard shortcuts: Ctrl+Z / Cmd+Z undo, Ctrl+Y / Cmd+Shift+Z redo, Enter finish run, Esc cancel, Delete remove run
@@ -198,14 +229,31 @@ export function StudioViewport({
         camera={{ position: [1.8, 3.8, 14.2], fov: 45, near: 0.1, far: 250 }}
       >
         <CanvasScreenshotRegistrar onRegisterCapture={onRegisterScreenshot} />
+        <CameraBoundsFitter fitBounds={fitBounds} orbitTarget={orbitTarget} />
         <SceneLightingRig lightingMode={lightingMode} />
 
         {job?.glbUrl && (
           <HouseMesh
             glbUrl={job.glbUrl}
             lightingMode={lightingMode}
-            onSceneLoaded={(group, minY) => {
+            onSceneLoaded={(group, minY, bounds) => {
               setGroundMinY(minY);
+              // Compute core building box (excluding wide ground_turf pad) for crisp 360° orbit framing
+              const coreBox = new THREE.Box3();
+              group.traverse((obj) => {
+                if (
+                  (obj as THREE.Mesh).isMesh &&
+                  !obj.name.includes('ground_turf') &&
+                  !obj.name.includes('walkway')
+                ) {
+                  coreBox.expandByObject(obj);
+                }
+              });
+              const activeBox = coreBox.isEmpty() ? bounds : coreBox;
+              const center = new THREE.Vector3();
+              activeBox.getCenter(center);
+              setOrbitTarget([center.x, Math.max(1.8, center.y * 0.92), center.z]);
+              setFitBounds(activeBox.clone());
               onSceneReady?.(group);
             }}
             onHoverHit={setHoverHit}
@@ -236,10 +284,10 @@ export function StudioViewport({
           enableDamping
           dampingFactor={0.08}
           enabled={!isPaintingScatter}
-          target={[1.6, 2.0, 1.5]}
+          target={orbitTarget}
           maxPolarAngle={Math.PI * 0.495}
           minDistance={2.5}
-          maxDistance={45}
+          maxDistance={65}
         />
 
         <EffectComposer>

@@ -146,6 +146,26 @@ function mapSurfaceHardwareRule(
         attachmentMethod:
           'Anchor top and bottom helix collars with non-marring padded UV zip-ties so wraps never slip.',
       };
+    case 'balcony_railing':
+      return {
+        itemDescription:
+          'Heavy-Duty UV-Stabilized Railing Zip-Ties & Non-Marring Deck Clamps (100-Pack)',
+        surfaceMaterial: surface,
+        quantity: safeClips,
+        packCount: Math.max(1, Math.ceil(safeClips / 100)),
+        attachmentMethod:
+          'Fasten strands along top/bottom balcony guardrails from inside the walk-out deck using non-marring HOA-safe clamps & UV zip-ties (zero drilling).',
+      };
+    case 'balcony_soffit':
+      return {
+        itemDescription:
+          'Outdoor Weatherproof Command / 3M VHB Soffit Cord Clips (50-Pack)',
+        surfaceMaterial: surface,
+        quantity: safeClips,
+        packCount: Math.max(1, Math.ceil(safeClips / 50)),
+        attachmentMethod:
+          'Clean balcony ceiling soffit with isopropyl alcohol and press outdoor VHB adhesive clips every 12 inches from a 6 ft step-stool.',
+      };
     case 'foliage_shrub':
       return {
         itemDescription: 'Green Foliage Branch & Net Locking Clips (100-Pack)',
@@ -256,7 +276,17 @@ function buildDeterministicBOMReport(
   }
 
   const circuits = telemetry.totals.gfci15ACircuitsNeeded;
-  const ladderFt = telemetry.totals.recommendedLadderFeet || 16;
+  const ladderFt = telemetry.totals.recommendedLadderFeet;
+  const ladderStepInstruction =
+    ladderFt === 0
+      ? `Install all balcony railing runs directly from inside the walk-out balcony deck (0 ft exterior ladder required; ${telemetry.totals.maxHeightFeet.toFixed(1)} ft building elevation).`
+      : ladderFt <= 6
+        ? `Use a ${ladderFt} ft folding step-ladder positioned stably on the flat walk-out balcony deck to attach overhead soffit runs.`
+        : `Position a ${ladderFt} ft fiberglass extension ladder to install upper gable and gutter runs (${telemetry.totals.maxHeightFeet.toFixed(1)} ft peak elevation).`;
+  const ladderSafetyNote =
+    ladderFt <= 6
+      ? 'Keep body center-of-gravity strictly inside the 42-inch balcony guardrail; never lean over outer railings.'
+      : `Maintain strict 4:1 base angle ratio with 3 ft of ladder rail extending above the ${ladderFt} ft ladder's eave contact point.`;
 
   return {
     spools,
@@ -297,9 +327,9 @@ function buildDeterministicBOMReport(
       },
       {
         stepNumber: 2,
-        phase: 'Ladder Setup & Upper Roofline Runs',
-        instruction: `Position a ${ladderFt} ft fiberglass extension ladder to install upper gable and gutter runs (${telemetry.totals.maxHeightFeet.toFixed(1)} ft peak elevation).`,
-        safetyNote: `Maintain strict 4:1 base angle ratio with 3 ft of ladder rail extending above the ${ladderFt} ft ladder's eave contact point.`,
+        phase: 'Access Setup & Elevated / Balcony Runs',
+        instruction: ladderStepInstruction,
+        safetyNote: ladderSafetyNote,
       },
       {
         stepNumber: 3,

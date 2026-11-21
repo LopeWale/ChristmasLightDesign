@@ -163,4 +163,74 @@ describe('Gate 5: Gemini Multimodal Critique, Hardware BOM & CSV/MD Export', () 
     expect(md).toContain('# Lumen3D Holiday Lighting Bill of Materials');
     expect(md).toContain('## 1. Light Spools');
   });
+
+  it('emits HOA-safe non-drilling railing clamps and VHB soffit clips for condo balconies', async () => {
+    const balconyRuns: LightRun[] = [
+      {
+        id: 'b-rail',
+        name: '2F Balcony Railing',
+        toolMode: 'LINEAR_EAVE',
+        bulbPreset: 'C9_LED',
+        spacingInches: 12,
+        colorsHex: ['#ffd996'],
+        pattern: 'SOLID',
+        controlPoints: [
+          [-2, 4.2, 5.8],
+          [2, 4.2, 5.8],
+        ],
+        bulbPositions: [
+          [-2, 4.2, 5.8],
+          [-1, 4.2, 5.8],
+          [0, 4.2, 5.8],
+          [1, 4.2, 5.8],
+          [2, 4.2, 5.8],
+        ],
+        surfaceMaterial: 'balcony_railing',
+      },
+      {
+        id: 'b-soffit',
+        name: '2F Balcony Soffit',
+        toolMode: 'LINEAR_EAVE',
+        bulbPreset: 'RGB_SOFFIT_PUCK',
+        spacingInches: 12,
+        colorsHex: ['#ffd996'],
+        pattern: 'SOLID',
+        controlPoints: [
+          [-2, 6.1, 5.2],
+          [2, 6.1, 5.2],
+        ],
+        bulbPositions: [
+          [-2, 6.1, 5.2],
+          [0, 6.1, 5.2],
+          [2, 6.1, 5.2],
+        ],
+        surfaceMaterial: 'balcony_soffit',
+      },
+    ];
+
+    const telemetry = computeDesignTelemetry({
+      runs: balconyRuns,
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+
+    const req = new Request('http://localhost:3000/api/copilot/bom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ telemetry, detectedZones: [] }),
+    });
+    const resp = await bomPost(req);
+    expect(resp.status).toBe(200);
+    const bom = BOMReportSchema.parse(await resp.json());
+
+    const railClip = bom.mountingHardware.find(
+      (h) => h.surfaceMaterial === 'balcony_railing'
+    );
+    const soffitClip = bom.mountingHardware.find(
+      (h) => h.surfaceMaterial === 'balcony_soffit'
+    );
+
+    expect(railClip?.itemDescription).toMatch(/Railing|Clamps/i);
+    expect(soffitClip?.itemDescription).toMatch(/VHB|Command/i);
+  });
 });

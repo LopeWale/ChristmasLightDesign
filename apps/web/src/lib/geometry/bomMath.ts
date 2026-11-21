@@ -86,6 +86,8 @@ export function computeDesignTelemetry(params: {
   let totalBulbs = 0;
   let totalWatts = 0;
   let maxHeightFeet = 0;
+  let maxExteriorLadderHeightFeet = 0;
+  let hasBalconySoffit = false;
 
   for (const run of runs) {
     const spec = BULB_PRESET_SPECS[run.bulbPreset];
@@ -121,6 +123,15 @@ export function computeDesignTelemetry(params: {
       maxHeightFeet = rawMaxElev;
     }
 
+    if (run.surfaceMaterial === 'balcony_soffit') {
+      hasBalconySoffit = true;
+    } else if (
+      run.surfaceMaterial !== 'balcony_railing' &&
+      rawMaxElev > maxExteriorLadderHeightFeet
+    ) {
+      maxExteriorLadderHeightFeet = rawMaxElev;
+    }
+
     if (rawWatts > MAX_SERIES_RUN_WATTS) {
       warnings.push(
         `Run "${run.name}" draws ${watts}W, exceeding the ${MAX_SERIES_RUN_WATTS}W end-to-end series strand limit. Split power injection.`
@@ -147,7 +158,20 @@ export function computeDesignTelemetry(params: {
   }
 
   const roundedMaxHeight = round2(maxHeightFeet);
-  const recommendedLadderFeet = computeRecommendedLadderFeet(maxHeightFeet);
+  const exteriorLadderFeet = computeRecommendedLadderFeet(
+    maxExteriorLadderHeightFeet
+  );
+  const balconyStepLadderFeet = hasBalconySoffit ? 6 : 0;
+  const recommendedLadderFeet = Math.max(
+    exteriorLadderFeet,
+    balconyStepLadderFeet
+  );
+
+  if (exteriorLadderFeet > 40) {
+    warnings.push(
+      `Exterior run elevation (${round2(maxExteriorLadderHeightFeet)} ft) requires > 40 ft residential ladder reach; use certified boom-lift or rope-access installers.`
+    );
+  }
 
   return {
     feetPerSceneUnit,

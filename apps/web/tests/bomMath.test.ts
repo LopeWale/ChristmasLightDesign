@@ -222,4 +222,78 @@ describe('Gate 4: Deterministic Footage, NEC Electrical & Ladder Math (bomMath)'
     expect(t.totals.maxHeightFeet).toBeCloseTo(12.0, 4);
     expect(t.totals.recommendedLadderFeet).toBe(16);
   });
+
+  it('uses walk-out deck safety math for balcony_railing (0 ft) and balcony_soffit (6 ft) while warning on >40 ft exterior roofs', () => {
+    // 3rd-floor balcony railing at y = 7.2m (~23.6 ft above ground) -> installed from inside balcony deck (0 ft ladder)
+    const railingRun = makeEaveRun({
+      id: 'run-3f-rail',
+      name: '3F Balcony Railing',
+      surfaceMaterial: 'balcony_railing',
+      controlPoints: [
+        [-2, 7.2, 5.8],
+        [2, 7.2, 5.8],
+      ],
+      bulbPositions: [
+        [-2, 7.2, 5.8],
+        [0, 7.2, 5.8],
+        [2, 7.2, 5.8],
+      ],
+    });
+
+    const tRail = computeDesignTelemetry({
+      runs: [railingRun],
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+    expect(tRail.totals.maxHeightFeet).toBeGreaterThan(20);
+    expect(tRail.totals.recommendedLadderFeet).toBe(0);
+
+    // Adding a 3rd-floor balcony soffit run -> requires only a 6 ft step-ladder on the balcony deck
+    const soffitRun = makeEaveRun({
+      id: 'run-3f-soffit',
+      name: '3F Balcony Ceiling Soffit',
+      surfaceMaterial: 'balcony_soffit',
+      bulbPreset: 'RGB_SOFFIT_PUCK',
+      controlPoints: [
+        [-2, 9.1, 5.4],
+        [2, 9.1, 5.4],
+      ],
+      bulbPositions: [
+        [-2, 9.1, 5.4],
+        [2, 9.1, 5.4],
+      ],
+    });
+
+    const tSoffit = computeDesignTelemetry({
+      runs: [railingRun, soffitRun],
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+    expect(tSoffit.totals.recommendedLadderFeet).toBe(6);
+
+    // Adding a 5-story exterior roof parapet run (y = 14.5m ≈ 47.6 ft -> > 40 ft max residential ladder)
+    const highRoofRun = makeEaveRun({
+      id: 'run-5f-roof',
+      name: '5F Exterior Parapet',
+      surfaceMaterial: 'asphalt_shingle',
+      controlPoints: [
+        [-4, 14.5, 4.8],
+        [4, 14.5, 4.8],
+      ],
+      bulbPositions: [
+        [-4, 14.5, 4.8],
+        [4, 14.5, 4.8],
+      ],
+    });
+
+    const tHighRoof = computeDesignTelemetry({
+      runs: [railingRun, highRoofRun],
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+    expect(tHighRoof.totals.recommendedLadderFeet).toBeGreaterThan(40);
+    expect(
+      tHighRoof.totals.warnings.some((w) => w.includes('40 ft'))
+    ).toBe(true);
+  });
 });

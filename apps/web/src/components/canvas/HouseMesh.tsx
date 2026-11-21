@@ -20,12 +20,16 @@ export interface HoverHitInfo {
 export interface HouseMeshProps {
   glbUrl: string;
   lightingMode: LightingMode;
-  onSceneLoaded: (group: THREE.Group, minY: number) => void;
+  onSceneLoaded: (group: THREE.Group, minY: number, bounds: THREE.Box3) => void;
   onHoverHit: (info: HoverHitInfo | null) => void;
 }
 
 export function inferSurfaceMaterialFromName(rawName: string): SurfaceMaterial {
   const n = rawName.toLowerCase();
+  if (n.includes('balcony_railing') || n.includes('railing') || n.includes('guardrail'))
+    return 'balcony_railing';
+  if (n.includes('balcony_soffit') || n.includes('soffit')) return 'balcony_soffit';
+  if (n.includes('balcony_slab')) return 'stucco';
   if (n.includes('roof') || n.includes('shingle')) return 'asphalt_shingle';
   if (n.includes('eave') || n.includes('gutter')) return 'metal_gutter';
   if (n.includes('door') && !n.includes('garage')) return 'wood_fascia';
@@ -174,8 +178,23 @@ export function HouseMesh({
         const minY = Number.isFinite(box.min.y) ? box.min.y : 0;
 
         materialsRef.current = mats;
-        setLoadedGroup(root);
-        onSceneLoaded(root, minY);
+        setLoadedGroup((prev) => {
+          if (prev) {
+            prev.traverse((oldObj) => {
+              if ((oldObj as THREE.Mesh).isMesh) {
+                const m = oldObj as THREE.Mesh;
+                m.geometry?.dispose();
+                if (Array.isArray(m.material)) {
+                  m.material.forEach((mat) => mat.dispose());
+                } else {
+                  m.material?.dispose();
+                }
+              }
+            });
+          }
+          return root;
+        });
+        onSceneLoaded(root, minY, box);
       },
       undefined,
       (err) => {

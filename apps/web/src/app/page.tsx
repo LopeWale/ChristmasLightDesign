@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import type * as THREE from 'three';
-import { Sparkles, UploadCloud, Loader2 } from 'lucide-react';
+import * as THREE from 'three';
+import { Sparkles, UploadCloud, Loader2, Building2, Home, MapPin } from 'lucide-react';
 import {
   CamerasPayloadSchema,
   CalibrationDetectionResultSchema,
   ReconstructionJobSchema,
+  type ArchitecturalBuildingSpec,
 } from '@lumen3d/shared-schemas';
 import { Toolbar } from '@/components/panels/Toolbar';
 import { TelemetryHUD } from '@/components/panels/TelemetryHUD';
@@ -27,6 +28,7 @@ export default function HomePage() {
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const sceneGroupRef = useRef<THREE.Group | null>(null);
   const screenshotFnRef = useRef<(() => string) | null>(null);
+  const [streetAddress, setStreetAddress] = useState<string>('');
 
   const job = useStudioStore((s) => s.job);
   const cameras = useStudioStore((s) => s.cameras);
@@ -61,7 +63,6 @@ export default function HomePage() {
   const setToolMode = useStudioStore((s) => s.setToolMode);
   const clearRulerPoints = useStudioStore((s) => s.clearRulerPoints);
 
-  // Expose store handle in browser window for deterministic diagnostics & E2E inspection
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as unknown as { __LUMEN3D_STORE__?: typeof useStudioStore }).__LUMEN3D_STORE__ =
@@ -100,24 +101,24 @@ export default function HomePage() {
           throw new Error(parsed.error || '3D reconstruction failed');
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
       throw new Error('Timed out waiting for reconstruction job');
     },
     [setCameras, setJob, setReconstructing]
   );
 
-  const handleLoadSampleHouse = async () => {
+  const handleLoadSamplePreset = async (preset: 'condo' | 'house') => {
     try {
       setReconstructing(true, null);
       const resp = await fetch('/api/reconstruct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ demo: true }),
+        body: JSON.stringify({ demo: true, preset }),
       });
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.error || 'Failed to launch sample house build');
+        throw new Error(data.error || 'Failed to launch sample build');
       }
       const initialJob = ReconstructionJobSchema.parse(data);
       setJob(initialJob);
@@ -125,7 +126,30 @@ export default function HomePage() {
     } catch (err) {
       setReconstructing(
         false,
-        err instanceof Error ? err.message : 'Sample house build failed'
+        err instanceof Error ? err.message : 'Sample build failed'
+      );
+    }
+  };
+
+  const handleRebuildBuildingSpec = async (spec: ArchitecturalBuildingSpec) => {
+    try {
+      setReconstructing(true, null);
+      const resp = await fetch('/api/reconstruct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ buildingSpec: spec }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || 'Failed to rebuild 3D mesh');
+      }
+      const initialJob = ReconstructionJobSchema.parse(data);
+      setJob(initialJob);
+      await pollJobUntilComplete(initialJob.jobId);
+    } catch (err) {
+      setReconstructing(
+        false,
+        err instanceof Error ? err.message : 'Rebuild failed'
       );
     }
   };
@@ -139,6 +163,9 @@ export default function HomePage() {
       const formData = new FormData();
       Array.from(fileList).forEach((f) => formData.append('files', f));
       formData.append('mode', 'auto');
+      if (streetAddress.trim()) {
+        formData.append('address', streetAddress.trim());
+      }
 
       const resp = await fetch('/api/reconstruct', {
         method: 'POST',
@@ -169,12 +196,32 @@ export default function HomePage() {
 
     try {
       setCalibrating(true, null);
+
+      // Extract front_door world bounding box if present (enables exact mock projection on tall condos too)
+      let doorWorldBox:
+        | { min: [number, number, number]; max: [number, number, number] }
+        | undefined;
+      sceneGroupRef.current.updateMatrixWorld(true);
+      sceneGroupRef.current.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh && obj.name.toLowerCase().includes('front_door')) {
+          const b = new THREE.Box3().setFromObject(obj);
+          if (!b.isEmpty()) {
+            doorWorldBox = {
+              min: [b.min.x, b.min.y, b.min.z],
+              max: [b.max.x, b.max.y, b.max.z],
+            };
+          }
+        }
+      });
+
       const resp = await fetch('/api/calibrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           jobId: job.jobId,
           referenceImageUrl: job.referenceImageUrl,
+          camera: cameras[0],
+          doorWorldBox,
         }),
       });
       const data = await resp.json();
@@ -211,8 +258,8 @@ export default function HomePage() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-studio-bg text-slate-100">
       {/* Top Studio Header Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-studio-border bg-slate-950/90 px-4">
-        <div className="flex items-center gap-3">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-studio-border bg-slate-950/90 px-4">
+        <div className="flex shrink-0 items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 ring-1 ring-amber-400/40">
             <Sparkles className="h-4 w-4" />
           </div>
@@ -221,37 +268,61 @@ export default function HomePage() {
               Lumen3D Studio
             </h1>
             <p className="text-[11px] text-slate-400">
-              Metric 3D Exterior Reconstruction &amp; Night-Bloom Holiday Lighting
+              Maps-Guided 3D Condo &amp; Home Reconstruction + Night-Bloom Lighting
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            data-testid="btn-load-sample-house"
-            disabled={isReconstructing}
-            onClick={handleLoadSampleHouse}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow transition hover:bg-amber-400 disabled:opacity-50"
-          >
-            {isReconstructing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            Load Sample House
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex items-center">
+            <MapPin className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-sky-400" />
+            <input
+              type="text"
+              data-testid="input-street-address"
+              value={streetAddress}
+              onChange={(e) => setStreetAddress(e.target.value)}
+              placeholder="Optional Street Address (Google Maps 3D footprint)"
+              className="w-64 rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-8 pr-2.5 text-xs text-slate-100 placeholder:text-slate-500"
+            />
+          </div>
 
           <button
             type="button"
             data-testid="btn-upload-media"
             disabled={isReconstructing}
             onClick={() => uploadInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
           >
             <UploadCloud className="h-3.5 w-3.5" />
             Upload Photos / Video
           </button>
+
+          <button
+            type="button"
+            data-testid="btn-load-sample-condo"
+            disabled={isReconstructing}
+            onClick={() => handleLoadSamplePreset('condo')}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow transition hover:bg-amber-400 disabled:opacity-50"
+          >
+            {isReconstructing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Building2 className="h-3.5 w-3.5" />
+            )}
+            Sample 3F Condo
+          </button>
+
+          <button
+            type="button"
+            data-testid="btn-load-sample-house"
+            disabled={isReconstructing}
+            onClick={() => handleLoadSamplePreset('house')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+          >
+            <Home className="h-3.5 w-3.5" />
+            Load Sample House
+          </button>
+
           <input
             ref={uploadInputRef}
             type="file"
@@ -265,7 +336,7 @@ export default function HomePage() {
 
       {/* Main Studio Body */}
       <div className="flex min-h-0 flex-1">
-        <Toolbar />
+        <Toolbar onRebuildBuildingSpec={handleRebuildBuildingSpec} />
 
         <main className="relative min-w-0 flex-1">
           <StudioViewport
@@ -302,28 +373,37 @@ export default function HomePage() {
           {/* Empty state welcome card before loading a 3D facade */}
           {!job && !isReconstructing && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-              <div className="pointer-events-auto max-w-md rounded-2xl border border-slate-800 bg-slate-950/90 p-6 text-center shadow-2xl backdrop-blur-md">
+              <div className="pointer-events-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-950/90 p-6 text-center shadow-2xl backdrop-blur-md">
                 <h2 className="text-base font-bold text-slate-100">
-                  Reconstruct Your 3D Exterior Facade
+                  Reconstruct Your 3D Condo or Home Exterior
                 </h2>
                 <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                  Upload multi-view exterior photos or a walkaround MP4/MOV video, or launch
-                  the metric-calibrated architectural Sample House to start designing in 3D
-                  Night-Bloom mode.
+                  Enter an optional street address (Google Maps footprint &amp; roof height) and
+                  upload walkaround photos or MP4/MOV video, or launch the{' '}
+                  <strong>3-Story Condo (2 Balconies)</strong> or{' '}
+                  <strong>Suburban House</strong> presets to start designing in 3D Night-Bloom mode.
                 </p>
                 {reconError && (
                   <p className="mt-3 rounded-lg bg-rose-950/60 p-2 text-xs text-rose-300">
                     {reconError}
                   </p>
                 )}
-                <div className="mt-4 flex justify-center gap-2">
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
                   <button
                     type="button"
-                    onClick={handleLoadSampleHouse}
+                    onClick={() => handleLoadSamplePreset('condo')}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-amber-400"
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Load Sample House
+                    <Building2 className="h-3.5 w-3.5" />
+                    Sample 3-Story Condo (2 Balconies)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadSamplePreset('house')}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                  >
+                    <Home className="h-3.5 w-3.5" />
+                    Sample House
                   </button>
                 </div>
               </div>

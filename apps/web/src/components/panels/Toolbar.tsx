@@ -19,12 +19,14 @@ import {
 } from 'lucide-react';
 import {
   BULB_PRESET_SPECS,
+  type ArchitecturalBuildingSpec,
   type BulbPreset,
   type LightPattern,
   type SurfaceMaterial,
   type ToolMode,
 } from '@lumen3d/shared-schemas';
 import { useStudioStore, type LightingMode } from '@/store/useStudioStore';
+import { BuildingAdjuster } from './BuildingAdjuster';
 
 const COLOR_PRESET_SWATCHES: Array<{ label: string; colors: string[] }> = [
   { label: 'Warm White', colors: ['#ffd996'] },
@@ -50,9 +52,15 @@ const SURFACE_MATERIALS: SurfaceMaterial[] = [
   'unknown',
 ];
 
-export function Toolbar() {
+export function Toolbar({
+  onRebuildBuildingSpec,
+}: {
+  onRebuildBuildingSpec?: (spec: ArchitecturalBuildingSpec) => void;
+} = {}) {
   const fileImportRef = useRef<HTMLInputElement>(null);
 
+  const job = useStudioStore((s) => s.job);
+  const isReconstructing = useStudioStore((s) => s.isReconstructing);
   const toolMode = useStudioStore((s) => s.toolMode);
   const lightingMode = useStudioStore((s) => s.lightingMode);
   const activeBulbPreset = useStudioStore((s) => s.activeBulbPreset);
@@ -180,6 +188,17 @@ export function Toolbar() {
           ))}
         </div>
       </div>
+
+      {/* Live 3D Building & Balcony Adjuster (enabled for architectural / condo meshes) */}
+      {job?.buildingSpec &&
+        job.backendUsed !== 'vggt' &&
+        onRebuildBuildingSpec && (
+          <BuildingAdjuster
+            spec={job.buildingSpec}
+            isReconstructing={isReconstructing}
+            onRebuildSpec={onRebuildBuildingSpec}
+          />
+        )}
 
       {/* Parametric Light Placement Tools */}
       <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-2.5">
