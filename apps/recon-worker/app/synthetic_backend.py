@@ -379,7 +379,12 @@ def render_reference_elevation_png(
         verts_w = np.asarray(geom.vertices, dtype=np.float64)
         faces = np.asarray(geom.faces, dtype=np.int64)
         face_normals = np.asarray(geom.face_normals, dtype=np.float64)
-        vcolors = np.asarray(geom.visual.vertex_colors, dtype=np.float64)[:, :3]
+        color_vis = (
+            geom.visual
+            if hasattr(geom.visual, "vertex_colors")
+            else geom.visual.to_color()
+        )
+        vcolors = np.asarray(color_vis.vertex_colors, dtype=np.float64)[:, :3]
 
         verts_c = (verts_w @ r_wc.T) + t_wc
         tri_c = verts_c[faces]  # (F, 3, 3)

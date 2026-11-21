@@ -117,9 +117,9 @@ function SceneAtmosphereAndSky({ lightingMode }: { lightingMode: LightingMode })
         fade
         speed={0.25}
       />
-      <hemisphereLight args={['#35538b', '#0d1528', 0.62]} />
-      <directionalLight position={[-12, 18, 14]} intensity={0.58} color="#7ea6ee" />
-      <directionalLight position={[14, 12, -12]} intensity={0.34} color="#5c82c8" />
+      <hemisphereLight args={['#4666a3', '#162038', 0.85]} />
+      <directionalLight position={[-12, 18, 16]} intensity={0.78} color="#92b4f4" />
+      <directionalLight position={[14, 12, 12]} intensity={0.48} color="#799be0" />
     </>
   );
 }

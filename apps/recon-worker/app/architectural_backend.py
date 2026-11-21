@@ -911,7 +911,13 @@ class ArchitecturalReconstructor(Reconstructor):
         if progress_cb:
             progress_cb(50)
 
-        scene = build_architectural_scene(spec)
+        if image_paths:
+            from app.photo_mesh_builder import build_photo_textured_architectural_scene
+
+            scene, spec = build_photo_textured_architectural_scene(image_paths, spec)
+        else:
+            scene = build_architectural_scene(spec)
+
         glb_path = output_dir / "scene.glb"
         glb_bytes = trimesh.exchange.gltf.export_glb(scene, include_normals=True)
         glb_path.write_bytes(glb_bytes)

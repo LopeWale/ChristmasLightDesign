@@ -39,8 +39,34 @@ export function getLightingTint(mode: LightingMode): THREE.Color {
       return new THREE.Color('#a6a8ce');
     case 'NIGHT':
     default:
-      return new THREE.Color('#47608c');
+      return new THREE.Color('#647ca8');
   }
+}
+
+export function createTintedGlbMaterial(
+  origMaterial: THREE.Material | THREE.Material[] | null | undefined,
+  hasVertexColors: boolean,
+  lightingMode: LightingMode
+): THREE.MeshStandardMaterial {
+  const primary = Array.isArray(origMaterial) ? origMaterial[0] : origMaterial;
+  const stdOrig = primary as THREE.MeshStandardMaterial | undefined;
+  const origMap = stdOrig?.map ?? null;
+
+  if (origMap) {
+    origMap.colorSpace = THREE.SRGBColorSpace;
+    origMap.anisotropy = 8;
+  }
+
+  return new THREE.MeshStandardMaterial({
+    color: getLightingTint(lightingMode),
+    map: origMap,
+    normalMap: stdOrig?.normalMap ?? null,
+    roughnessMap: stdOrig?.roughnessMap ?? null,
+    metalnessMap: stdOrig?.metalnessMap ?? null,
+    vertexColors: origMap ? false : hasVertexColors,
+    roughness: typeof stdOrig?.roughness === 'number' ? stdOrig.roughness : 0.8,
+    metalness: typeof stdOrig?.metalness === 'number' ? stdOrig.metalness : 0.07,
+  });
 }
 
 function extractNearbyMeshTriangles(
@@ -334,12 +360,11 @@ export function HouseMesh({
             const hasVertexColors = Boolean(
               mesh.geometry.getAttribute('color')
             );
-            const stdMat = new THREE.MeshStandardMaterial({
-              color: getLightingTint(lightingMode),
-              vertexColors: hasVertexColors,
-              roughness: 0.8,
-              metalness: 0.07,
-            });
+            const stdMat = createTintedGlbMaterial(
+              mesh.material,
+              hasVertexColors,
+              lightingMode
+            );
             mesh.material = stdMat;
             mesh.castShadow = true;
             mesh.receiveShadow = true;

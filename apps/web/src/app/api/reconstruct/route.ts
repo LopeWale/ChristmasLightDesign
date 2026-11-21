@@ -173,7 +173,7 @@ async function extractSpecWithGeminiIfAvailable(
       });
     }
 
-    if (mapsCtx?.streetViewBase64) {
+    if (mapsCtx?.streetViewBase64 && imageFiles.length === 0) {
       contents.push({
         inlineData: {
           mimeType: mapsCtx.streetViewMimeType || 'image/jpeg',
@@ -194,7 +194,7 @@ async function extractSpecWithGeminiIfAvailable(
       text: [
         'Extract a 3D ArchitecturalBuildingSpec JSON from these exterior building photos for holiday lighting reconstruction.',
         mapsHint,
-        'Identify exact floor count (1..8), roofStyle (flat_parapet, pitched_gable, hip), RGB colors [0..255] for wall/trim/roof, windowBaysPerFloor, and every visible upper-floor or ground balcony (floor 1..8, wallFace front/left/right/rear, centerOffsetNorm -0.35..+0.35, mountStyle cantilevered/recessed, railingType metal_picket/glass_panel/solid_parapet).',
+        'Identify exact floor count (1..8), roofStyle (flat_parapet, pitched_gable, hip), RGB colors [0..255] for wall/trim/roof, windowBaysPerFloor, and ONLY genuine protruding walk-out balconies (return balconies: [] if the facade is flush with no walk-out balcony decks).',
       ].join('\n'),
     });
 
@@ -258,10 +258,10 @@ async function extractSpecWithGeminiIfAvailable(
     }
 
     raw.footprintPolygonMeters = mapsCtx?.footprintPolygonMeters ?? [
-      [-6.2, -4.8],
-      [6.2, -4.8],
-      [6.2, 4.8],
-      [-6.2, 4.8],
+      [-4.2, -4.2],
+      [4.2, -4.2],
+      [4.2, 4.2],
+      [-4.2, 4.2],
     ];
     const validated: ArchitecturalBuildingSpec =
       ArchitecturalBuildingSpecSchema.parse(raw);

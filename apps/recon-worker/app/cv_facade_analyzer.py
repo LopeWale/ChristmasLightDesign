@@ -254,12 +254,11 @@ def analyze_facade_images(
                     above_luma = float(body_gray[above_y, paired_cols].mean())
                     below_luma = float(body_gray[below_y, paired_cols].mean())
                     slab_luma = float(body_gray[y_scan + 1 : partner, paired_cols].mean())
-                    is_bright_slab = slab_luma >= max(above_luma, below_luma) + 18.0
-                    is_dark_iron_rail = (
-                        slab_luma <= min(above_luma, below_luma) - 22.0
-                        and (partner - y_scan) <= 14
+                    is_bright_slab = (
+                        slab_luma >= 170.0
+                        and slab_luma >= max(above_luma, below_luma) + 36.0
                     )
-                    if is_bright_slab or is_dark_iron_rail:
+                    if is_bright_slab:
                         slab_centers_y.append(mid_y)
                         y_scan = partner + max(6, body_h // 12)
                         continue

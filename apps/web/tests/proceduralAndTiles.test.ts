@@ -6,6 +6,7 @@ import {
   computeTilesGroundLevelOffset,
   CLIENT_CONDO_SPEC,
 } from '../src/lib/geometry/proceduralBuilding';
+import { createTintedGlbMaterial } from '../src/components/canvas/HouseMesh';
 import { useStudioStore } from '../src/store/useStudioStore';
 
 describe('Task 3: Client Procedural Fallback, 3D Tile Surface Classifier & Scene Source Store', () => {
@@ -182,5 +183,22 @@ describe('Task 3: Client Procedural Fallback, 3D Tile Surface Classifier & Scene
 
     const deltaY = computeTilesGroundLevelOffset(group);
     expect(deltaY).toBeCloseTo(28.5, 1);
+  });
+
+  it('preserves embedded glTF PBR photo textures (SRGBColorSpace) across Day, Dusk, and Night lighting modes', () => {
+    const tex = new THREE.Texture();
+    const gltfMat = new THREE.MeshStandardMaterial({ map: tex });
+
+    const matDay = createTintedGlbMaterial(gltfMat, false, 'DAY');
+    expect(matDay.map).toBe(tex);
+    expect(matDay.map?.colorSpace).toBe(THREE.SRGBColorSpace);
+    expect(matDay.vertexColors).toBe(false);
+    expect(matDay.color.getHexString()).toBe('ffffff');
+
+    const matNight = createTintedGlbMaterial(gltfMat, true, 'NIGHT');
+    expect(matNight.map).toBe(tex);
+    // When a UV photo texture is present, vertexColors must remain false so vertices do not darken/corrupt the photo
+    expect(matNight.vertexColors).toBe(false);
+    expect(matNight.color.r).toBeLessThan(0.5);
   });
 });

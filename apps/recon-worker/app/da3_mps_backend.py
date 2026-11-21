@@ -171,11 +171,20 @@ class DA3MpsReconstructor(Reconstructor):
             progress_cb(65)
 
         scene = trimesh.load(str(base_artifacts.glb_path), file_type="glb")
-        merged = (
-            trimesh.util.concatenate(list(scene.geometry.values()))
-            if isinstance(scene, trimesh.Scene)
-            else scene
-        )
+        if isinstance(scene, trimesh.Scene):
+            color_meshes = []
+            for g in scene.geometry.values():
+                if not isinstance(g, trimesh.Trimesh):
+                    continue
+                gc = g.copy()
+                if not hasattr(gc.visual, "vertex_colors"):
+                    gc.visual = gc.visual.to_color()
+                color_meshes.append(gc)
+            merged = trimesh.util.concatenate(color_meshes)
+        else:
+            merged = scene.copy()
+            if not hasattr(merged.visual, "vertex_colors"):
+                merged.visual = merged.visual.to_color()
 
         # Sample surface splats across the reconstructed 3D building
         surf_pts, face_idx = trimesh.sample.sample_surface(merged, 2400, seed=42)
