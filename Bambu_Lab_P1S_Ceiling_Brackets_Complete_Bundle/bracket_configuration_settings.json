@@ -1,0 +1,67 @@
+{
+  "project": "Ceiling Light & Ornament Zig-Zag Wall Brackets",
+  "target_printer": "Bambu Lab P1S (256x256x256 mm Textured PEI Plate)",
+  "print_orientation": {
+    "bed_axis": "Z (Bracket 12.0 mm width lies flat on Z=0 build plate)",
+    "wall_to_pole_axis": "X (0 to 6.0 mm wall plate + 25.4 mm / 1.00 inch pole = 31.4 mm total)",
+    "vertical_wall_height_axis": "Y (0 to 38.0 mm / 1.50 inch vertical wall plate)",
+    "supports_required": false
+  },
+  "dimensions_mm": {
+    "plate_thickness_x": 6.0,
+    "pole_length_x": 25.4,
+    "pole_length_inches": 1.0,
+    "plate_height_y": 38.0,
+    "bracket_width_z": 12.0,
+    "pole_shaft_height_y": 10.0,
+    "thread_eyelet_center_xy": [
+      26.0,
+      15.0
+    ],
+    "thread_eyelet_inner_diameter": 4.0,
+    "thread_eyelet_flared_mouth_diameter": 6.0,
+    "main_nail_hole_y": 30.5,
+    "main_nail_hole_diameter": 3.5,
+    "main_nail_countersink_diameter": 7.0,
+    "secondary_anti_rotation_pinhole_y": 23.2,
+    "secondary_anti_rotation_pinhole_diameter": 2.2,
+    "middle_top_hook_cradle_center_x": 17.5,
+    "start_end_horn_cleat_span_mm": 13.6,
+    "start_end_v_cinch_slot_taper_mm": [
+      1.2,
+      0.25
+    ]
+  },
+  "bambu_p1s_slicer_settings": {
+    "type": "process",
+    "name": "Bambu P1S - Ceiling Light Bracket (4 Walls, 25% Gyroid, 0 Supports)",
+    "from": "User",
+    "inherits": "0.20mm Standard @BBL X1C",
+    "version": "1.9.0.0",
+    "print_settings_id": "Bambu P1S - Ceiling Light Bracket (4 Walls, 25% Gyroid, 0 Supports)",
+    "compatible_printers": [
+      "Bambu Lab P1S 0.4 nozzle",
+      "Bambu Lab P1P 0.4 nozzle",
+      "Bambu Lab X1 Carbon 0.4 nozzle",
+      "Bambu Lab A1 0.4 nozzle"
+    ],
+    "layer_height": "0.2",
+    "initial_layer_print_height": "0.2",
+    "wall_loops": "4",
+    "top_shell_layers": "5",
+    "bottom_shell_layers": "5",
+    "sparse_infill_density": "25%",
+    "sparse_infill_pattern": "gyroid",
+    "enable_support": "0",
+    "support_type": "normal(auto)",
+    "brim_type": "no_brim",
+    "brim_width": "0",
+    "elefant_foot_compensation": "0.15",
+    "wall_generator": "arachne",
+    "detect_thin_wall": "1",
+    "seam_position": "aligned",
+    "outer_wall_speed": "120",
+    "inner_wall_speed": "200",
+    "sparse_infill_speed": "230"
+  }
+}
