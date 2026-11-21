@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   CalibrationDetectionResultSchema,
   type CalibrationDetectionResult,
+  type CameraPose,
 } from '@lumen3d/shared-schemas';
 import {
   getGenAIClient,
@@ -53,10 +54,67 @@ const CALIBRATION_SCHEMA: Schema = {
   required: ['front_door', 'garage_door', 'zones'],
 };
 
-function buildMockCalibrationResult(): CalibrationDetectionResult {
+function projectWorldBoxToNormBox2D(
+  camera: CameraPose,
+  minPt: [number, number, number],
+  maxPt: [number, number, number]
+): [number, number, number, number] | null {
+  // Invert 4x4 orthonormal rigid transform [R | t] -> [R^T | -R^T t]
+  const e = camera.extrinsics;
+  const r00 = e[0][0], r01 = e[0][1], r02 = e[0][2], tx = e[0][3];
+  const r10 = e[1][0], r11 = e[1][1], r12 = e[1][2], ty = e[1][3];
+  const r20 = e[2][0], r21 = e[2][1], r22 = e[2][2], tz = e[2][3];
+
+  const fx = camera.intrinsics[0][0];
+  const fy = camera.intrinsics[1][1];
+  const cx = camera.intrinsics[0][2];
+  const cy = camera.intrinsics[1][2];
+
+  const corners: Array<[number, number, number]> = [
+    [minPt[0], minPt[1], maxPt[2]],
+    [maxPt[0], minPt[1], maxPt[2]],
+    [minPt[0], maxPt[1], maxPt[2]],
+    [maxPt[0], maxPt[1], maxPt[2]],
+  ];
+
+  const us: number[] = [];
+  const vs: number[] = [];
+  for (const [wx, wy, wz] of corners) {
+    const dx = wx - tx;
+    const dy = wy - ty;
+    const dz = wz - tz;
+    const xc = r00 * dx + r10 * dy + r20 * dz;
+    const yc = r01 * dx + r11 * dy + r21 * dz;
+    const zc = r02 * dx + r12 * dy + r22 * dz;
+    if (zc <= 0.2) return null;
+    us.push(((fx * (xc / zc) + cx) / camera.width) * 1000.0);
+    vs.push(((fy * (yc / zc) + cy) / camera.height) * 1000.0);
+  }
+
+  const ymin = Math.max(0, Math.min(999, Math.min(...vs)));
+  const ymax = Math.max(ymin + 2, Math.min(1000, Math.max(...vs)));
+  const xmin = Math.max(0, Math.min(999, Math.min(...us)));
+  const xmax = Math.max(xmin + 2, Math.min(1000, Math.max(...us)));
+  return [
+    Math.round(ymin * 10) / 10,
+    Math.round(xmin * 10) / 10,
+    Math.round(ymax * 10) / 10,
+    Math.round(xmax * 10) / 10,
+  ];
+}
+
+function buildMockCalibrationResult(
+  camera?: CameraPose,
+  doorWorldBox?: { min: [number, number, number]; max: [number, number, number] }
+): CalibrationDetectionResult {
+  const projectedDoor =
+    camera && doorWorldBox
+      ? projectWorldBoxToNormBox2D(camera, doorWorldBox.min, doorWorldBox.max)
+      : null;
+
   return {
-    front_door: [491.5, 364.0, 728.4, 426.2],
-    garage_door: [494.0, 715.4, 734.2, 886.4],
+    front_door: projectedDoor || [491.5, 364.0, 728.4, 426.2],
+    garage_door: projectedDoor ? null : [494.0, 715.4, 734.2, 886.4],
     zones: [
       {
         label: 'Main Pitched Gable Roof',
@@ -156,10 +214,14 @@ export async function POST(request: Request): Promise<Response> {
       imageBase64?: string;
       referenceImageUrl?: string;
       jobId?: string;
+      camera?: CameraPose;
+      doorWorldBox?: { min: [number, number, number]; max: [number, number, number] };
     };
 
     if (isGeminiMockMode()) {
-      const mock = CalibrationDetectionResultSchema.parse(buildMockCalibrationResult());
+      const mock = CalibrationDetectionResultSchema.parse(
+        buildMockCalibrationResult(body.camera, body.doorWorldBox)
+      );
       return NextResponse.json(mock);
     }
 
