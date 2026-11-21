@@ -572,8 +572,14 @@ export default function HomePage() {
           {/* Bottom-Center Pascal-Style Floating Tool Dock */}
           <FloatingDock />
 
-          {/* Responsive High-Contrast Dark Obsidian Telemetry Pill (single DOM instance) */}
-          <div className="pointer-events-none fixed right-4 top-16 z-20 w-[340px] max-w-[calc(100vw-2rem)] xl:bottom-5 xl:right-5 xl:top-auto xl:w-[390px]">
+          {/* Responsive High-Contrast Dark Obsidian Telemetry Pill (single DOM instance; shifts left when right drawer opens) */}
+          <div
+            className={`pointer-events-none fixed z-20 w-[330px] max-w-[calc(100vw-2rem)] transition-all ${
+              activeDrawer !== 'NONE'
+                ? 'left-4 top-16'
+                : 'right-4 top-16 xl:bottom-5 xl:right-4 xl:top-auto'
+            }`}
+          >
             <TelemetryHUD telemetry={telemetry} />
           </div>
 

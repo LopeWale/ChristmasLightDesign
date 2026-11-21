@@ -4,17 +4,17 @@
 **Lumen3D** is a monorepo web studio for 3D exterior multi-view & address-guided reconstruction (supporting multi-story condos with balconies as well as pitched-roof homes), metric spatial scale calibration, multi-orientation holiday light design with night-bloom rendering, deterministic NEC electrical & walk-out balcony ladder math, and Gemini-powered design critique & HOA-safe Bill of Materials (BOM) generation.
 
 ## Hard Architectural Invariants (Non-Negotiable)
-1. **Multi-View & Address-Guided Scene Reconstruction Only:** Never use single-object 3D mesh generators (`TripoSR`, `TRELLIS`, `Zero123`, `Shap-E`). Always use `apps/recon-worker` (`ArchitecturalReconstructor` powered by Google Maps `displayPolygon`/Solar + Gemini/OpenCV `cv_facade_analyzer.py`, `VGGTReconstructor` + `Open3D` `ScalableTSDFVolume` on CUDA, or the classic `SyntheticReconstructor` house).
-2. **Multi-Mode Reconstruction (`RECON_BACKEND=auto|architectural|vggt|synthetic`):** `auto` selects `vggt` when CUDA + VGGT/Open3D are installed (without an explicit `ArchitecturalBuildingSpec`), and otherwise uses `architectural` (`cv_facade_analyzer.py` + `architectural_backend.py`) so uploaded condo/home photos and videos produce matching multi-story 360° `.glb` buildings on CPU / Apple Silicon.
-3. **Decimated `.glb` Mesh with Outward Vertex Normals:** Every reconstruction job emits `scene.glb` (`<= 250k` faces, valid unit-length outward vertex normals, zero `NaN` vertices, `minY = 0.0`), `cameras.json`, and `reference_front.png`.
+1. **Photorealistic 3D Tiles, Apple Silicon Splat/Depth & Multi-View Reconstruction:** Never use toy single-object 3D mesh generators (`TripoSR`, `TRELLIS`, `Zero123`, `Shap-E`). Address lookups stream live **Google Photorealistic 3D Tiles** via `NASA-AMMOS/3DTilesRendererJS` (`3d-tiles-renderer/r3f` + server-side `/api/maps/tiles/[...path]` proxy), while uploaded walkaround photos/videos use `apps/recon-worker` (`DA3MpsReconstructor` emitting `.glb` + `.splat` for `@react-three/drei` `<Splat>`, `ArchitecturalReconstructor`, `VGGTReconstructor` on CUDA, or client-side `proceduralBuilding.ts` fallback when offline).
+2. **Multi-Mode Reconstruction (`RECON_BACKEND=auto|da3|architectural|vggt|synthetic`) & Auto-Venv Startup:** `scripts/dev-worker.sh` auto-detects or bootstraps `apps/recon-worker/.venv` so `npm run dev` works on any fresh clone or active `.venv`.
+3. **Decimated `.glb` Mesh with Outward Vertex Normals:** Every worker reconstruction job emits `scene.glb` (`<= 250k` faces, valid unit-length outward vertex normals, zero `NaN` vertices, `minY = 0.0`), optional `scene.splat`, `cameras.json`, and `reference_front.png`.
 4. **Deterministic Math First, LLM Second:** Spline arc-lengths (feet), bulb counts, wattage, NEC 15A/80% (`1,440W`) circuit loads, `210W` / `200 ft` series run limits, walk-out balcony ladder sizing (`0 ft` for `balcony_railing`, `6 ft` step-stool for `balcony_soffit`), and `4:1 + 3ft` exterior extension ladder sizing are computed purely in TypeScript (`bomMath.ts`) before passing `DesignTelemetry` JSON to Gemini.
 5. **Pinned Gemini SDK, Google Maps Platform ToS & Key Hygiene:**
    - Use ONLY `@google/genai` (`import { GoogleGenAI, Type } from '@google/genai'`). Never install or import `@google/generative-ai`.
    - Keep `GEMINI_API_KEY` and `GOOGLE_MAPS_API_KEY` strictly server-side inside `apps/web/src/app/api/**`. Never expose keys via `NEXT_PUBLIC_*`.
-   - Include `X-Goog-Maps-Solution-ID: gmp_git_agentskills_v1` and `Cache-Control: no-store` on all Google Maps REST requests; never mix non-Google map data, never train models on Maps content, and always require user media alongside address enrichment.
+   - Include `X-Goog-Maps-Solution-ID: gmp_git_agentskills_v1` and `Cache-Control: no-store` on all Google Maps REST and Map Tiles proxy requests; display `<TilesAttributionOverlay />` when Photorealistic 3D Tiles are active; never export Google 3D Tiles offline to `.glb`, never mix non-Google map data, never train models on Maps content, and always require user media when reconstructing standalone `.glb` meshes from non-Tile Maps metadata.
    - Root `.env` and `apps/web/.env` are both supported server-side.
    - Deterministic mock responses are returned **only** when `GEMINI_MOCK_MODE=true`.
-6. **WebGL Buffer Preservation:** `<Canvas gl={{ preserveDrawingBuffer: true, antialias: true }}>` is mandatory so `toDataURL('image/png')` captures real composited night-bloom frames for multimodal critique.
+6. **WebGL Buffer Preservation & Full-Bleed Progressive UX:** `<Canvas gl={{ preserveDrawingBuffer: true, antialias: true }}>` is mandatory, landing state (`sceneSource === 'NONE'`) must remain free of sidebars/empty HUDs, and floating dark obsidian HUD pills must maintain high contrast across `DAY`, `DUSK`, and `NIGHT` physical `<Sky>` modes.
 
 ## Ports & Services
 | Service | Path | Port | URL |
@@ -63,3 +63,4 @@ npm run dev
 - [x] **Gate 4:** Deterministic Footage, NEC Electrical & Ladder Safety Engine (`bomMath.ts`)
 - [x] **Gate 5:** Gemini Multimodal Design Co-Pilot, Hardware BOM & E2E Verification
 - [x] **Phase 2:** Google Maps Footprint + Multi-Story Condo & Balcony 3D Reconstruction
+- [x] **Phase 3:** Photorealistic 3D Tiles (`3DTilesRendererJS`), Apple Silicon Splat/Depth & Full-Bleed Spatial Studio Redesign

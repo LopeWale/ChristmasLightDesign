@@ -130,8 +130,8 @@ export function CopilotDrawer({
   return (
     <aside
       data-testid="copilot-drawer"
-      style={{ backgroundColor: 'rgba(7, 11, 22, 0.95)' }}
-      className="pointer-events-auto fixed bottom-24 right-4 top-20 z-30 flex w-[400px] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto rounded-2xl border border-white/15 p-4 text-xs text-slate-200 shadow-[0_28px_70px_rgba(0,0,0,0.8)] backdrop-blur-2xl"
+      style={{ backgroundColor: 'rgba(7, 11, 22, 0.96)' }}
+      className="pointer-events-auto fixed bottom-5 right-4 top-16 z-30 flex w-[380px] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto rounded-2xl border border-white/15 p-4 text-xs text-slate-200 shadow-[0_28px_70px_rgba(0,0,0,0.82)] backdrop-blur-2xl"
     >
       {/* Slide-Over Header + Tabs + Close */}
       <div className="flex items-center justify-between border-b border-white/10 pb-3">

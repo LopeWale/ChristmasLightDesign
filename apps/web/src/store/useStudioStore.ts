@@ -236,7 +236,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       job,
       proceduralPreset: null,
       tilesAnchor: null,
-      sceneSource: job ? 'MESH_RECON' : state.sceneSource,
+      sceneSource:
+        job && (job.status === 'completed' || state.sceneSource !== 'NONE')
+          ? 'MESH_RECON'
+          : state.sceneSource,
       sceneTitle:
         title !== undefined
           ? title

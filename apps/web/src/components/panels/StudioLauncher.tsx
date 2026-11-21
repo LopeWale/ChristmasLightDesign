@@ -60,7 +60,8 @@ export function StudioLauncher({
   return (
     <div
       data-testid="studio-launcher"
-      className="pointer-events-auto relative w-full max-w-xl rounded-3xl border border-white/15 bg-[#070b16]/92 p-7 text-slate-100 shadow-[0_32px_90px_rgba(0,0,0,0.8)] backdrop-blur-2xl"
+      style={{ backgroundColor: 'rgba(7, 11, 22, 0.94)' }}
+      className="pointer-events-auto relative w-full max-w-xl rounded-3xl border border-white/15 p-7 text-slate-100 shadow-[0_32px_90px_rgba(0,0,0,0.8)] backdrop-blur-2xl"
     >
       {canDismiss && onDismiss && (
         <button
@@ -170,20 +171,20 @@ export function StudioLauncher({
 
       {/* 2. Drag-and-Drop Walkaround Photos / Video */}
       <div className="mt-4">
-        <div className="mb-1.5 flex items-center justify-between">
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
           <span className="text-[11px] font-medium text-slate-300">
-            2. Or Reconstruct from Walkaround Photos / Video
+            2. Or Reconstruct from Photos / Walkaround Video
           </span>
           <div
             role="group"
             aria-label="Reconstruction engine"
-            className="inline-flex rounded-lg border border-white/10 bg-white/[0.04] p-0.5 text-[10px]"
+            className="inline-flex shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-0.5 text-[10px]"
           >
             <button
               type="button"
               data-testid="mode-architectural"
               onClick={() => setReconMode('auto')}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium transition ${
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 font-medium transition ${
                 reconMode === 'auto'
                   ? 'bg-white/15 text-white'
                   : 'text-slate-400 hover:text-slate-200'
@@ -196,7 +197,7 @@ export function StudioLauncher({
               type="button"
               data-testid="mode-da3"
               onClick={() => setReconMode('da3')}
-              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium transition ${
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 font-medium transition ${
                 reconMode === 'da3'
                   ? 'bg-amber-400/20 text-amber-200'
                   : 'text-slate-400 hover:text-slate-200'

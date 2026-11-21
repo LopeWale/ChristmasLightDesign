@@ -157,7 +157,8 @@ export function FloatingDock() {
       {isStyleOpen && (
         <div
           data-testid="style-popover"
-          className="pointer-events-auto w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/15 bg-[#070b16]/95 p-4 text-xs text-slate-200 shadow-[0_24px_60px_rgba(0,0,0,0.75)] backdrop-blur-2xl"
+          style={{ backgroundColor: 'rgba(5, 8, 20, 0.96)' }}
+          className="pointer-events-auto w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/15 p-4 text-xs text-slate-200 shadow-[0_24px_60px_rgba(0,0,0,0.75)] backdrop-blur-2xl"
         >
           <div className="mb-3 flex items-center justify-between border-b border-white/10 pb-2">
             <span className="font-semibold text-white">
@@ -413,7 +414,10 @@ export function FloatingDock() {
 
       {/* Contextual Active Drawing Pill */}
       {draftPoints.length > 0 && (
-        <div className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-amber-400/40 bg-[#070b16]/95 px-4 py-1.5 text-xs text-slate-100 shadow-xl backdrop-blur-xl">
+        <div
+          style={{ backgroundColor: 'rgba(5, 8, 20, 0.95)' }}
+          className="pointer-events-auto flex items-center gap-2.5 rounded-full border border-amber-400/40 px-4 py-1.5 text-xs text-slate-100 shadow-xl backdrop-blur-xl"
+        >
           <span className="text-slate-300">
             <strong className="text-amber-300">{draftPoints.length}</strong>{' '}
             {draftPoints.length === 1 ? 'point' : 'points'} placed
@@ -439,7 +443,10 @@ export function FloatingDock() {
       )}
 
       {/* Main Horizontal Floating Dock */}
-      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/15 bg-[#070b16]/92 p-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.7)] backdrop-blur-2xl">
+      <div
+        style={{ backgroundColor: 'rgba(5, 8, 20, 0.94)' }}
+        className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/15 p-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.75)] backdrop-blur-2xl"
+      >
         {tools.map((t) => {
           const active = toolMode === t.mode;
           return (
@@ -448,10 +455,10 @@ export function FloatingDock() {
               type="button"
               data-testid={t.testId}
               onClick={() => setToolMode(t.mode)}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-2 text-xs font-medium transition ${
                 active
                   ? 'bg-amber-400 font-semibold text-slate-950 shadow-sm'
-                  : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
+                  : 'text-slate-200 hover:bg-white/[0.08] hover:text-white'
               }`}
             >
               {t.icon}
@@ -460,14 +467,14 @@ export function FloatingDock() {
           );
         })}
 
-        <div className="mx-1 h-5 w-px bg-white/12" />
+        <div className="mx-0.5 h-5 w-px bg-white/15" />
 
         {/* Bulb & Color Style Popover Trigger */}
         <button
           type="button"
           data-testid="btn-toggle-style-popover"
           onClick={() => setIsStyleOpen((v) => !v)}
-          className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition ${
+          className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-2 text-xs font-medium transition ${
             isStyleOpen
               ? 'bg-white/15 text-white'
               : 'text-slate-200 hover:bg-white/[0.08]'
