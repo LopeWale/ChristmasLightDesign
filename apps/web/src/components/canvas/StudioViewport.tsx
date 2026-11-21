@@ -38,11 +38,12 @@ function CameraBoundsFitter({
     if (!fitBounds) return;
     const size = new THREE.Vector3();
     fitBounds.getSize(size);
-    const height = Math.max(4.0, size.y);
-    const dist = Math.max(13.8, height * 1.65);
+    const height = Math.max(4.5, size.y);
+    const horizSpan = Math.max(8.0, size.x, size.z);
+    const dist = Math.max(18.5, height * 2.15, horizSpan * 1.65);
     camera.position.set(
-      orbitTarget[0] + 0.3,
-      Math.max(3.6, height * 0.52),
+      orbitTarget[0] + 0.5,
+      Math.max(4.0, height * 0.54),
       orbitTarget[2] + dist
     );
     camera.lookAt(orbitTarget[0], orbitTarget[1], orbitTarget[2]);
@@ -58,7 +59,8 @@ function SceneLightingRig({ lightingMode }: { lightingMode: LightingMode }) {
       <>
         <color attach="background" args={['#9ec5e8']} />
         <hemisphereLight args={['#dceeff', '#5c7052', 1.15]} />
-        <directionalLight position={[12, 18, 14]} intensity={1.55} color="#fff7eb" />
+        <directionalLight position={[12, 18, 14]} intensity={1.45} color="#fff7eb" />
+        <directionalLight position={[-14, 14, -12]} intensity={0.65} color="#d6e8ff" />
       </>
     );
   }
@@ -66,16 +68,18 @@ function SceneLightingRig({ lightingMode }: { lightingMode: LightingMode }) {
     return (
       <>
         <color attach="background" args={['#1a1b38']} />
-        <hemisphereLight args={['#6e6ca8', '#25263d', 0.65]} />
-        <directionalLight position={[-14, 8, 10]} intensity={0.75} color="#ff9d6c" />
+        <hemisphereLight args={['#7d7bb8', '#2a2c48', 0.85]} />
+        <directionalLight position={[-14, 10, 12]} intensity={0.85} color="#ff9d6c" />
+        <directionalLight position={[15, 12, -12]} intensity={0.55} color="#8ba8e8" />
       </>
     );
   }
   return (
     <>
       <color attach="background" args={['#050814']} />
-      <hemisphereLight args={['#2b4370', '#0c1324', 0.42]} />
-      <directionalLight position={[-10, 16, 12]} intensity={0.48} color="#7aa2e8" />
+      <hemisphereLight args={['#334e82', '#10182d', 0.55]} />
+      <directionalLight position={[-10, 16, 12]} intensity={0.52} color="#7aa2e8" />
+      <directionalLight position={[14, 12, -12]} intensity={0.32} color="#5c82c8" />
     </>
   );
 }

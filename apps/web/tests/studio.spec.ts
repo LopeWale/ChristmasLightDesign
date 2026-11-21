@@ -118,3 +118,80 @@ test('Gate 5 E2E: Sample House -> 3D Night Canvas -> Calibrate -> Roofline & Col
     expect(csvContent).toContain('Mounting Hardware');
   }
 });
+
+test('3-Story Condo (2 Balconies): Load Condo -> Light Both Balcony Railings -> Verify 0ft Walk-Out Ladder & HOA BOM -> Rebuild via Balcony Adjuster', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // 1. Click "Sample 3F Condo"
+  await page.getByTestId('btn-load-sample-condo').click();
+  await expect(page.getByTestId('calibration-overlay')).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId('building-adjuster-panel')).toBeVisible();
+
+  await page.waitForTimeout(500);
+
+  // 2. Auto-calibrate via front door on the 3-story condo
+  await page.getByTestId('btn-auto-calibrate').click();
+  await expect(page.getByTestId('calibration-status-badge')).toContainText(
+    'Auto-calibrated via Front Door: 6.67 ft'
+  );
+
+  // 3. Place holiday lights along both 2nd-floor and 3rd-floor walk-out balcony railings
+  await page.evaluate(() => {
+    const win = window as unknown as {
+      __LUMEN3D_STORE__?: {
+        getState: () => {
+          addRunDirect: (run: Record<string, unknown>) => void;
+        };
+      };
+    };
+    const store = win.__LUMEN3D_STORE__?.getState();
+    if (!store) return;
+
+    store.addRunDirect({
+      name: '2nd Floor Balcony Railing Wrap',
+      toolMode: 'LINEAR_EAVE',
+      bulbPreset: 'C9_LED',
+      spacingInches: 8,
+      colorsHex: ['#ffd996', '#ff2424'],
+      pattern: 'ALTERNATING',
+      controlPoints: [
+        [-4.5, 4.27, 6.26],
+        [-0.9, 4.27, 6.26],
+      ],
+      surfaceMaterial: 'balcony_railing',
+    });
+
+    store.addRunDirect({
+      name: '3rd Floor Balcony Railing Wrap',
+      toolMode: 'LINEAR_EAVE',
+      bulbPreset: 'C9_LED',
+      spacingInches: 8,
+      colorsHex: ['#ffd996', '#ff2424'],
+      pattern: 'CANDY_CANE',
+      controlPoints: [
+        [0.9, 7.37, 6.26],
+        [4.5, 7.37, 6.26],
+      ],
+      surfaceMaterial: 'balcony_railing',
+    });
+  });
+
+  // 4. Verify walk-out balcony ladder rule: max height > 20ft, recommended exterior ladder = "—" (0 ft!)
+  await expect(page.getByTestId('telemetry-ladder')).toContainText('/ —');
+
+  // 5. Generate HOA-safe Hardware BOM and verify non-drilling Railing Clamps
+  await page.getByTestId('btn-generate-bom').click();
+  await expect(page.getByTestId('bom-report')).toBeVisible();
+  await expect(page.getByTestId('bom-report')).toContainText('Railing');
+
+  // 6. Change Balcony #1 railing to solid_parapet and click Rebuild 3D Mesh (<1s live update)
+  await page
+    .getByTestId('select-balcony-railing-0')
+    .selectOption('solid_parapet');
+  await page.getByTestId('btn-rebuild-spec').click();
+  await expect(page.getByTestId('building-adjuster-panel')).toBeVisible();
+});

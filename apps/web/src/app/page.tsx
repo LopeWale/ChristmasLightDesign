@@ -325,6 +325,7 @@ export default function HomePage() {
 
           <input
             ref={uploadInputRef}
+            data-testid="input-upload-files"
             type="file"
             multiple
             accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
