@@ -301,6 +301,10 @@ export const MapsBuildingContextSchema = z.object({
   estimatedFloors: z.number().int().min(1).max(8).nullable(),
   roofPitchDegrees: z.number().min(0).max(55).nullable(),
   streetViewBase64: z.string().nullable(),
+  streetViewMimeType: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
   streetViewCopyright: z.string().nullable(),
   warnings: z.array(z.string()),
 });

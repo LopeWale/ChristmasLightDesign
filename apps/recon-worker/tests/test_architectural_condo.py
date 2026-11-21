@@ -223,3 +223,58 @@ def test_spec_json_rebuild_endpoint_updates_balconies_under_1s(
     assert elapsed < 1.5
     assert done["status"] == "completed"
     assert len(done["buildingSpec"]["balconies"]) == 3
+
+
+def test_cv_analyzer_picks_sharpest_view_and_applies_maps_floor_overrides_before_balconies(
+    tmp_path: Path,
+):
+    from app.cv_facade_analyzer import analyze_facade_images
+
+    # Frame 0: blurry uniform occlusion frame (e.g. passing tree / sidewalk)
+    blurry = np.full((720, 1280, 3), 120, dtype=np.uint8)
+    p_blurry = tmp_path / "f0_blurry.png"
+    cv2.imwrite(str(p_blurry), blurry)
+
+    # Frame 1: wide 16:9 landscape 3-story condo with 4 horizontal band edges
+    wide_condo = np.full((720, 1280, 3), (225, 195, 155), dtype=np.uint8)
+    cv2.rectangle(wide_condo, (140, 180), (1140, 660), (85, 105, 175), -1)
+    for y_band in [290, 410, 530]:
+        cv2.rectangle(wide_condo, (180, y_band), (1100, y_band + 14), (235, 235, 240), -1)
+    p_sharp = tmp_path / "f1_wide_condo.png"
+    cv2.imwrite(str(p_sharp), wide_condo)
+
+    spec = analyze_facade_images(
+        [p_blurry, p_sharp],
+        partial_overrides={"floors": 3, "roofStyle": "flat_parapet"},
+    )
+    assert spec.floors == 3
+    assert spec.archetype == "multi_story_condo"
+    assert spec.hasGarage is False
+    assert len(spec.balconies) >= 2
+
+
+def test_concave_u_shaped_footprint_roof_cap_has_no_courtyard_triangles():
+    from app.architectural_backend import PRESET_CONDO_3F_2B, build_architectural_scene
+
+    u_shape = [
+        (-6.0, -4.0),
+        (6.0, -4.0),
+        (6.0, 4.0),
+        (3.0, 4.0),
+        (3.0, -1.0),
+        (-3.0, -1.0),
+        (-3.0, 4.0),
+        (-6.0, 4.0),
+    ]
+    spec = PRESET_CONDO_3F_2B.model_copy(
+        update={"footprintPolygonMeters": u_shape, "balconies": []}
+    )
+    scene = build_architectural_scene(spec)
+    roof = scene.geometry["pitched_gable_roof"]
+    # Upward-facing horizontal roof triangles
+    up_mask = roof.face_normals[:, 1] > 0.9
+    roof_centers = roof.vertices[roof.faces[up_mask]].mean(axis=1)
+    # Open courtyard is x in (-2.5, +2.5) and z in (+0.2, +3.8): zero roof triangles should sit there
+    in_courtyard = (np.abs(roof_centers[:, 0]) < 2.5) & (roof_centers[:, 2] > 0.2)
+    assert not np.any(in_courtyard), "Found roof triangles spanning open concave courtyard"
+

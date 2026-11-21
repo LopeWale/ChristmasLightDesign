@@ -233,4 +233,80 @@ describe('Gate 5: Gemini Multimodal Critique, Hardware BOM & CSV/MD Export', () 
     expect(railClip?.itemDescription).toMatch(/Railing|Clamps/i);
     expect(soffitClip?.itemDescription).toMatch(/VHB|Command/i);
   });
+
+  it('avoids balcony instructions on ground-only stakes and prescribes boom-lift instead of >40ft ladder on 5-story roofs', async () => {
+    const groundRun: LightRun = {
+      id: 'walkway-1',
+      name: 'Walkway Stakes',
+      toolMode: 'PATHWAY_STAKE',
+      bulbPreset: 'PATHWAY_C9_STAKE',
+      spacingInches: 24,
+      colorsHex: ['#ffd996'],
+      pattern: 'SOLID',
+      controlPoints: [
+        [-1, 0, 4],
+        [-1, 0, 8],
+      ],
+      bulbPositions: [
+        [-1, 0, 4],
+        [-1, 0, 6],
+        [-1, 0, 8],
+      ],
+      surfaceMaterial: 'ground_turf',
+    };
+    const tGround = computeDesignTelemetry({
+      runs: [groundRun],
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+    const respGround = await bomPost(
+      new Request('http://localhost:3000/api/copilot/bom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telemetry: tGround }),
+      })
+    );
+    const bomGround = BOMReportSchema.parse(await respGround.json());
+    expect(bomGround.safetyAndInstallPlan[1].instruction.toLowerCase()).not.toContain(
+      'balcony'
+    );
+
+    const roof5F: LightRun = {
+      id: 'roof-5f',
+      name: '5F Parapet',
+      toolMode: 'LINEAR_EAVE',
+      bulbPreset: 'C9_LED',
+      spacingInches: 12,
+      colorsHex: ['#ffd996'],
+      pattern: 'SOLID',
+      controlPoints: [
+        [-4, 14.5, 4.8],
+        [4, 14.5, 4.8],
+      ],
+      bulbPositions: [
+        [-4, 14.5, 4.8],
+        [4, 14.5, 4.8],
+      ],
+      surfaceMaterial: 'asphalt_shingle',
+    };
+    const t5F = computeDesignTelemetry({
+      runs: [roof5F],
+      feetPerSceneUnit: 3.28084,
+      calibrationSource: 'AUTO_DOOR',
+    });
+    const resp5F = await bomPost(
+      new Request('http://localhost:3000/api/copilot/bom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telemetry: t5F }),
+      })
+    );
+    const bom5F = BOMReportSchema.parse(await resp5F.json());
+    expect(bom5F.safetyAndInstallPlan[1].instruction.toLowerCase()).toMatch(
+      /boom-lift|lift|rope-access/
+    );
+    expect(bom5F.safetyAndInstallPlan[1].instruction).not.toContain(
+      '52 ft fiberglass extension ladder'
+    );
+  });
 });

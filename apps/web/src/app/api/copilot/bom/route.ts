@@ -277,16 +277,53 @@ function buildDeterministicBOMReport(
 
   const circuits = telemetry.totals.gfci15ACircuitsNeeded;
   const ladderFt = telemetry.totals.recommendedLadderFeet;
-  const ladderStepInstruction =
-    ladderFt === 0
-      ? `Install all balcony railing runs directly from inside the walk-out balcony deck (0 ft exterior ladder required; ${telemetry.totals.maxHeightFeet.toFixed(1)} ft building elevation).`
-      : ladderFt <= 6
-        ? `Use a ${ladderFt} ft folding step-ladder positioned stably on the flat walk-out balcony deck to attach overhead soffit runs.`
-        : `Position a ${ladderFt} ft fiberglass extension ladder to install upper gable and gutter runs (${telemetry.totals.maxHeightFeet.toFixed(1)} ft peak elevation).`;
-  const ladderSafetyNote =
-    ladderFt <= 6
-      ? 'Keep body center-of-gravity strictly inside the 42-inch balcony guardrail; never lean over outer railings.'
-      : `Maintain strict 4:1 base angle ratio with 3 ft of ladder rail extending above the ${ladderFt} ft ladder's eave contact point.`;
+  const hasBalconyRailing = telemetry.runs.some(
+    (r) => r.surfaceMaterial === 'balcony_railing'
+  );
+  const hasBalconySoffit = telemetry.runs.some(
+    (r) => r.surfaceMaterial === 'balcony_soffit'
+  );
+
+  let ladderStepInstruction: string;
+  let ladderSafetyNote: string;
+
+  if (ladderFt > 40) {
+    const balconyAddon = hasBalconySoffit
+      ? ' Use a 6 ft step-ladder inside walk-out balcony decks for balcony soffit runs.'
+      : hasBalconyRailing
+        ? ' Install walk-out balcony railing runs directly from inside the balcony deck.'
+        : '';
+    ladderStepInstruction = `Engage a certified boom-lift or rope-access crew for exterior roof runs at ${telemetry.totals.maxHeightFeet.toFixed(1)} ft peak elevation (exceeds 40 ft residential ladder rating; calculated ${ladderFt} ft reach).${balconyAddon}`;
+    ladderSafetyNote =
+      'Never use an extension ladder above 40 ft; require OSHA-compliant aerial boom-lift harness or rope-access fall arrest.';
+  } else if (ladderFt > 6) {
+    const balconyAddon = hasBalconySoffit
+      ? ' Use a separate 6 ft folding step-ladder inside the walk-out balcony deck for overhead soffit runs.'
+      : hasBalconyRailing
+        ? ' Install balcony railing runs from inside the walk-out balcony deck.'
+        : '';
+    ladderStepInstruction = `Position a ${ladderFt} ft fiberglass extension ladder to install upper gable and gutter runs (${telemetry.totals.maxHeightFeet.toFixed(1)} ft peak elevation).${balconyAddon}`;
+    ladderSafetyNote = `Maintain strict 4:1 base angle ratio with 3 ft of ladder rail extending above the ${ladderFt} ft ladder's eave contact point.${
+      hasBalconyRailing || hasBalconySoffit
+        ? ' Keep center-of-gravity inside the 42-inch guardrail when working on balconies.'
+        : ''
+    }`;
+  } else if (hasBalconySoffit) {
+    ladderStepInstruction = `Use a ${Math.max(6, ladderFt)} ft folding step-ladder positioned stably on the flat walk-out balcony deck to attach overhead soffit${
+      hasBalconyRailing ? ' and railing' : ''
+    } runs.`;
+    ladderSafetyNote =
+      'Keep body center-of-gravity strictly inside the 42-inch balcony guardrail; never lean over outer railings.';
+  } else if (hasBalconyRailing) {
+    ladderStepInstruction = `Install all balcony railing runs directly from inside the walk-out balcony deck (0 ft exterior ladder required; ${telemetry.totals.maxHeightFeet.toFixed(1)} ft building elevation).`;
+    ladderSafetyNote =
+      'Keep body center-of-gravity strictly inside the 42-inch balcony guardrail; never lean over outer railings.';
+  } else {
+    ladderStepInstruction =
+      'Install all ground-level pathway stakes and low shrub runs directly from firm ground (0 ft ladder required).';
+    ladderSafetyNote =
+      'Wear insulated work gloves and verify clear footing along turf borders and stone walkways before pressing stakes.';
+  }
 
   return {
     spools,

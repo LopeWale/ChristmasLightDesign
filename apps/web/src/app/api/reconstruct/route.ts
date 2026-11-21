@@ -13,7 +13,10 @@ import {
   Type,
   type Schema,
 } from '@/lib/gemini/client';
-import { fetchGoogleMapsBuildingContext } from '@/lib/maps/buildingContext';
+import {
+  fetchGoogleMapsBuildingContext,
+  mapsContextToPartialOverrides,
+} from '@/lib/maps/buildingContext';
 
 function getWorkerBaseUrl(): string {
   return (process.env.RECON_WORKER_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
@@ -109,28 +112,16 @@ async function extractSpecWithGeminiIfAvailable(
   uploadedFiles: File[],
   mapsCtx: MapsBuildingContext | null
 ): Promise<Record<string, unknown> | null> {
+  const fallbackOverrides = mapsCtx
+    ? mapsContextToPartialOverrides(mapsCtx)
+    : null;
   const geminiKey = process.env.GEMINI_API_KEY;
   if (
     isGeminiMockMode() ||
     !geminiKey ||
     geminiKey === 'your_gemini_api_key_here'
   ) {
-    if (!mapsCtx) return null;
-    // Pass Maps geometric overrides so worker's OpenCV analyzer merges them with pixel analysis
-    const partial: Record<string, unknown> = {};
-    if (mapsCtx.footprintPolygonMeters) {
-      partial.footprintPolygonMeters = mapsCtx.footprintPolygonMeters;
-    }
-    if (mapsCtx.estimatedFloors !== null) {
-      partial.floors = mapsCtx.estimatedFloors;
-    }
-    if (mapsCtx.roofPitchDegrees !== null) {
-      partial.roofPitchDegrees = mapsCtx.roofPitchDegrees;
-      partial.roofStyle =
-        mapsCtx.roofPitchDegrees < 6 ? 'flat_parapet' : 'pitched_gable';
-    }
-    partial.sourceSummary = `Google Maps (${mapsCtx.formattedAddress}) + OpenCV facade extraction`;
-    return partial;
+    return fallbackOverrides;
   }
 
   try {
@@ -143,11 +134,18 @@ async function extractSpecWithGeminiIfAvailable(
     const imageFiles = uploadedFiles
       .filter((f) => f.type.startsWith('image/'))
       .slice(0, 3);
+
+    // If user uploaded only a walkaround video (no image/*), let the worker's OpenCV keyframe
+    // pipeline analyze the video frames merged with Google Maps partial overrides.
+    if (imageFiles.length === 0 && uploadedFiles.length > 0) {
+      return fallbackOverrides;
+    }
+
     for (const imgFile of imageFiles) {
       const buf = Buffer.from(await imgFile.arrayBuffer());
       contents.push({
         inlineData: {
-          mimeType: imgFile.type || 'image/png',
+          mimeType: imgFile.type || 'image/jpeg',
           data: buf.toString('base64'),
         },
       });
@@ -156,16 +154,14 @@ async function extractSpecWithGeminiIfAvailable(
     if (mapsCtx?.streetViewBase64) {
       contents.push({
         inlineData: {
-          mimeType: 'image/png',
+          mimeType: mapsCtx.streetViewMimeType || 'image/jpeg',
           data: mapsCtx.streetViewBase64,
         },
       });
     }
 
     if (contents.length === 0) {
-      return mapsCtx?.footprintPolygonMeters
-        ? { footprintPolygonMeters: mapsCtx.footprintPolygonMeters }
-        : null;
+      return fallbackOverrides;
     }
 
     const mapsHint = mapsCtx
@@ -189,8 +185,56 @@ async function extractSpecWithGeminiIfAvailable(
       },
     });
 
-    if (!resp.text) return null;
+    if (!resp.text) return fallbackOverrides;
     const raw = JSON.parse(resp.text) as Record<string, unknown>;
+    const clampedFloors = Math.max(
+      1,
+      Math.min(8, Math.round(Number(raw.floors) || mapsCtx?.estimatedFloors || 3))
+    );
+    raw.floors = clampedFloors;
+    raw.metersPerFloor = Math.max(
+      2.4,
+      Math.min(5.0, Number(raw.metersPerFloor) || 3.05)
+    );
+    raw.roofPitchDegrees = Math.max(
+      0,
+      Math.min(
+        55,
+        Number.isFinite(Number(raw.roofPitchDegrees))
+          ? Number(raw.roofPitchDegrees)
+          : mapsCtx?.roofPitchDegrees ?? 18
+      )
+    );
+    raw.windowBaysPerFloor = Math.max(
+      1,
+      Math.min(12, Math.round(Number(raw.windowBaysPerFloor) || 3))
+    );
+    const clampRgbArr = (arr: unknown, def: [number, number, number]) =>
+      Array.isArray(arr) && arr.length >= 3
+        ? [0, 1, 2].map((i) =>
+            Math.max(0, Math.min(255, Math.round(Number(arr[i]) || def[i])))
+          )
+        : def;
+    raw.wallColorRgb = clampRgbArr(raw.wallColorRgb, [168, 118, 96]);
+    raw.trimColorRgb = clampRgbArr(raw.trimColorRgb, [236, 238, 242]);
+    raw.roofColorRgb = clampRgbArr(raw.roofColorRgb, [58, 62, 70]);
+
+    if (Array.isArray(raw.balconies)) {
+      raw.balconies = raw.balconies
+        .filter((b): b is Record<string, unknown> => Boolean(b && typeof b === 'object'))
+        .map((b, idx) => ({
+          ...b,
+          id: String(b.id || `balcony-${idx + 1}`),
+          floor: Math.max(1, Math.min(clampedFloors, Math.round(Number(b.floor) || 2))),
+          centerOffsetNorm: Math.max(
+            -0.45,
+            Math.min(0.45, Number(b.centerOffsetNorm) || 0)
+          ),
+          widthMeters: Math.max(1.0, Math.min(14.0, Number(b.widthMeters) || 3.2)),
+          depthMeters: Math.max(0.4, Math.min(6.0, Number(b.depthMeters) || 1.4)),
+        }));
+    }
+
     raw.footprintPolygonMeters = mapsCtx?.footprintPolygonMeters ?? [
       [-6.2, -4.8],
       [6.2, -4.8],
@@ -201,9 +245,7 @@ async function extractSpecWithGeminiIfAvailable(
       ArchitecturalBuildingSpecSchema.parse(raw);
     return validated as unknown as Record<string, unknown>;
   } catch {
-    return mapsCtx?.footprintPolygonMeters
-      ? { footprintPolygonMeters: mapsCtx.footprintPolygonMeters }
-      : null;
+    return fallbackOverrides;
   }
 }
 

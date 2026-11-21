@@ -202,6 +202,79 @@ def _make_oriented_prism(
     )
 
 
+def _triangulate_polygon_earclip(poly_xz: np.ndarray) -> list[list[int]]:
+    """
+    Pure-NumPy 2D ear-clipping triangulation for simple convex or concave polygons
+    normalized with `shoelace <= 0` (so `[i_prev, i_curr, i_next]` has +Y normal `(0, 1, 0)`).
+    """
+    n = len(poly_xz)
+    if n < 3:
+        return []
+    if n == 3:
+        return [[0, 1, 2]]
+
+    def y_cross(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+        return float((b[1] - a[1]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[1] - a[1]))
+
+    indices = list(range(n))
+    faces: list[list[int]] = []
+    guard = 0
+    max_iters = n * n + 16
+
+    while len(indices) > 3 and guard < max_iters:
+        guard += 1
+        m = len(indices)
+        ear_found = False
+
+        for idx in range(m):
+            i_prev = indices[(idx - 1) % m]
+            i_curr = indices[idx]
+            i_next = indices[(idx + 1) % m]
+            a = poly_xz[i_prev]
+            b = poly_xz[i_curr]
+            c = poly_xz[i_next]
+
+            if y_cross(a, b, c) <= 1e-8:
+                continue
+
+            contains_other = False
+            for other in indices:
+                if other in (i_prev, i_curr, i_next):
+                    continue
+                p = poly_xz[other]
+                if (
+                    y_cross(a, b, p) >= -1e-7
+                    and y_cross(b, c, p) >= -1e-7
+                    and y_cross(c, a, p) >= -1e-7
+                ):
+                    contains_other = True
+                    break
+
+            if not contains_other:
+                faces.append([i_prev, i_curr, i_next])
+                indices.pop(idx)
+                ear_found = True
+                break
+
+        if not ear_found:
+            # Degenerate/collinear fallback: clip sharpest positive corner
+            i_prev, i_curr, i_next = indices[0], indices[1], indices[2]
+            if y_cross(poly_xz[i_prev], poly_xz[i_curr], poly_xz[i_next]) >= 0:
+                faces.append([i_prev, i_curr, i_next])
+            else:
+                faces.append([i_prev, i_next, i_curr])
+            indices.pop(1)
+
+    if len(indices) == 3:
+        a, b, c = poly_xz[indices[0]], poly_xz[indices[1]], poly_xz[indices[2]]
+        if y_cross(a, b, c) >= 0:
+            faces.append([indices[0], indices[1], indices[2]])
+        else:
+            faces.append([indices[0], indices[2], indices[1]])
+
+    return faces
+
+
 def _extrude_polygon_walls_and_cap(
     poly_xz: np.ndarray,
     y0: float,
@@ -209,7 +282,7 @@ def _extrude_polygon_walls_and_cap(
     rgba: tuple[int, int, int, int],
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
     """
-    Extrude a 2D polygon into outward-facing vertical walls + top horizontal cap.
+    Extrude a 2D polygon into outward-facing vertical walls + ear-clipped top horizontal cap.
     """
     n = len(poly_xz)
     verts_list: list[list[float]] = []
@@ -253,21 +326,9 @@ def _extrude_polygon_walls_and_cap(
         process=False,
     )
 
-    # Top horizontal roof deck cap (fan from centroid for clean convex/star footprints)
-    cx = float(poly_xz[:, 0].mean())
-    cz = float(poly_xz[:, 1].mean())
-    cap_verts = [[cx, y1, cz]] + [[float(p[0]), y1, float(p[1])] for p in poly_xz]
-    cap_faces: list[list[int]] = []
-    for i in range(n):
-        # Cross((p[i]-c), (p[i+1]-c)) for shoelace < 0 has +Y normal when ordered [0, i+1, ((i+1)%n)+1]
-        i0 = i + 1
-        i1 = ((i + 1) % n) + 1
-        v_a = np.array(cap_verts[i0]) - np.array(cap_verts[0])
-        v_b = np.array(cap_verts[i1]) - np.array(cap_verts[0])
-        if np.cross(v_a, v_b)[1] >= 0:
-            cap_faces.append([0, i0, i1])
-        else:
-            cap_faces.append([0, i1, i0])
+    # Top horizontal roof deck cap (ear-clipped so concave U-/L-shaped footprints have zero courtyard faces)
+    cap_verts = [[float(p[0]), y1, float(p[1])] for p in poly_xz]
+    cap_faces = _triangulate_polygon_earclip(poly_xz)
 
     cap_v_np = np.asarray(cap_verts, dtype=np.float64)
     cap_n_np = np.tile(np.array([[0.0, 1.0, 0.0]], dtype=np.float64), (len(cap_v_np), 1))
@@ -416,23 +477,60 @@ def build_architectural_scene(spec: ArchitecturalBuildingSpecModel) -> trimesh.S
         )
         scene.add_geometry(eaves_mesh, node_name="eaves_gutters", geom_name="eaves_gutters")
     else:
-        # Flat condo roof membrane + 360-degree raised parapet wall & coping trim
-        parapet_outer, parapet_top = _extrude_polygon_walls_and_cap(
-            poly * 1.015, bldg_h, bldg_h + 0.42, roof_rgba
-        )
-        coping_walls, coping_cap = _extrude_polygon_walls_and_cap(
-            poly * 1.028, bldg_h + 0.42, bldg_h + 0.52, trim_rgba
-        )
+        # Flat condo recessed roof membrane + 360-degree perimeter parapet wall & coping rim
+        _, roof_membrane = _extrude_polygon_walls_and_cap(poly, bldg_h - 0.02, bldg_h, roof_rgba)
+        parapet_segments: list[trimesh.Trimesh] = [roof_membrane]
+        coping_segments: list[trimesh.Trimesh] = []
+        n_poly = len(poly)
+        for i in range(n_poly):
+            p0 = poly[i]
+            p1 = poly[(i + 1) % n_poly]
+            d_vec = p1 - p0
+            seg_len = float(np.linalg.norm(d_vec))
+            if seg_len < 0.08:
+                continue
+            t_u = d_vec / seg_len
+            n_u = np.array([-t_u[1], t_u[0]], dtype=np.float64)
+            mid_pt = 0.5 * (p0 + p1)
+            parapet_segments.append(
+                _make_oriented_prism(
+                    mid_pt,
+                    t_u,
+                    n_u,
+                    -0.5 * seg_len - 0.12,
+                    0.5 * seg_len + 0.12,
+                    bldg_h,
+                    bldg_h + 0.42,
+                    -0.22,
+                    0.04,
+                    roof_rgba,
+                )
+            )
+            coping_segments.append(
+                _make_oriented_prism(
+                    mid_pt,
+                    t_u,
+                    n_u,
+                    -0.5 * seg_len - 0.15,
+                    0.5 * seg_len + 0.15,
+                    bldg_h + 0.42,
+                    bldg_h + 0.52,
+                    -0.25,
+                    0.08,
+                    trim_rgba,
+                )
+            )
         scene.add_geometry(
-            trimesh.util.concatenate([top_cap, parapet_outer, parapet_top]),
+            trimesh.util.concatenate(parapet_segments),
             node_name="pitched_gable_roof",
             geom_name="pitched_gable_roof",
         )
-        scene.add_geometry(
-            trimesh.util.concatenate([coping_walls, coping_cap]),
-            node_name="eaves_gutters",
-            geom_name="eaves_gutters",
-        )
+        if coping_segments:
+            scene.add_geometry(
+                trimesh.util.concatenate(coping_segments),
+                node_name="eaves_gutters",
+                geom_name="eaves_gutters",
+            )
 
     # 5. Primary ground-floor front entry door (exact 6.67 ft = 2.033016m height for metric calibration)
     door_y0 = 0.14

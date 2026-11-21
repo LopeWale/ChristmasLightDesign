@@ -3,8 +3,10 @@ import { MapsBuildingContextSchema } from '@lumen3d/shared-schemas';
 import {
   latLngRingToLocalMeters,
   fetchGoogleMapsBuildingContext,
+  mapsContextToPartialOverrides,
 } from '../src/lib/maps/buildingContext';
 import { POST as mapsPost } from '../src/app/api/maps/building-context/route';
+import { useStudioStore } from '../src/store/useStudioStore';
 
 describe('Task 3: Google Maps Building Context & Condo Extraction API', () => {
   const originalEnv = { ...process.env };
@@ -211,5 +213,86 @@ describe('Task 3: Google Maps Building Context & Condo Extraction API', () => {
     expect(resp.status).toBe(503);
     const body = await resp.json();
     expect(body.error).toMatch(/GOOGLE_MAPS_API_KEY/);
+  });
+
+  it('preserves streetViewMimeType image/jpeg, builds full partial overrides, and tracks UI Maps attribution', async () => {
+    const stubFetch: typeof fetch = async (input) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('geocode.googleapis.com/v4/geocode/destinations')) {
+        return new Response(
+          JSON.stringify({
+            destinations: [
+              {
+                primary: {
+                  formattedAddress: '200 Condo Way, Seattle, WA 98101',
+                  location: { latitude: 47.6062, longitude: -122.3321 },
+                  displayPolygon: {
+                    type: 'Polygon',
+                    coordinates: [
+                      [
+                        [-122.33218, 47.60615],
+                        [-122.33202, 47.60615],
+                        [-122.33202, 47.60625],
+                        [-122.33218, 47.60625],
+                        [-122.33218, 47.60615],
+                      ],
+                    ],
+                  },
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      if (url.includes('streetview/metadata')) {
+        return new Response(
+          JSON.stringify({
+            status: 'OK',
+            copyright: '© 2026 Google',
+            location: { lat: 47.606, lng: -122.3321 },
+          }),
+          { status: 200 }
+        );
+      }
+      if (url.includes('maps.googleapis.com/maps/api/streetview?')) {
+        return new Response(new Uint8Array([255, 216, 255]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }
+      if (url.includes('elevation')) {
+        return new Response(JSON.stringify({ results: [{ elevation: 50.0 }] }), {
+          status: 200,
+        });
+      }
+      if (url.includes('buildingInsights')) {
+        return new Response(
+          JSON.stringify({
+            solarPotential: {
+              roofSegmentStats: [{ pitchDegrees: 1.5, planeHeightAtCenterMeters: 62.4 }],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    };
+
+    const ctx = await fetchGoogleMapsBuildingContext(
+      '200 Condo Way, Seattle, WA',
+      'fake-key',
+      stubFetch
+    );
+    expect(ctx.streetViewMimeType).toBe('image/jpeg');
+
+    const overrides = mapsContextToPartialOverrides(ctx);
+    expect(overrides.floors).toBe(4);
+    expect(overrides.roofStyle).toBe('flat_parapet');
+    expect(Array.isArray(overrides.footprintPolygonMeters)).toBe(true);
+
+    useStudioStore.getState().setMapsStatus('© 2026 Google', ['Solar fallback']);
+    expect(useStudioStore.getState().mapsAttribution).toBe('© 2026 Google');
+    expect(useStudioStore.getState().mapsWarnings).toEqual(['Solar fallback']);
   });
 });

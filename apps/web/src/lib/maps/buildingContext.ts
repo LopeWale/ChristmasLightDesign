@@ -219,6 +219,7 @@ export async function fetchGoogleMapsBuildingContext(
   // 2. Street View Static Metadata + Facade Reference Image
   let streetBearingDeg: number | null = null;
   let streetViewBase64: string | null = null;
+  let streetViewMimeType: string | null = null;
   let streetViewCopyright: string | null = null;
 
   try {
@@ -256,6 +257,9 @@ export async function fetchGoogleMapsBuildingContext(
           cache: 'no-store',
         });
         if (svImgResp.ok) {
+          streetViewMimeType =
+            svImgResp.headers.get('content-type')?.split(';')[0]?.trim() ||
+            'image/jpeg';
           const buf = Buffer.from(await svImgResp.arrayBuffer());
           streetViewBase64 = buf.toString('base64');
         }
@@ -353,7 +357,27 @@ export async function fetchGoogleMapsBuildingContext(
     estimatedFloors,
     roofPitchDegrees,
     streetViewBase64,
+    streetViewMimeType,
     streetViewCopyright,
     warnings,
   });
+}
+
+export function mapsContextToPartialOverrides(
+  mapsCtx: MapsBuildingContext
+): Record<string, unknown> {
+  const partial: Record<string, unknown> = {};
+  if (mapsCtx.footprintPolygonMeters) {
+    partial.footprintPolygonMeters = mapsCtx.footprintPolygonMeters;
+  }
+  if (mapsCtx.estimatedFloors !== null) {
+    partial.floors = mapsCtx.estimatedFloors;
+  }
+  if (mapsCtx.roofPitchDegrees !== null) {
+    partial.roofPitchDegrees = mapsCtx.roofPitchDegrees;
+    partial.roofStyle =
+      mapsCtx.roofPitchDegrees < 6 ? 'flat_parapet' : 'pitched_gable';
+  }
+  partial.sourceSummary = `Google Maps (${mapsCtx.formattedAddress}) + OpenCV facade extraction`;
+  return partial;
 }

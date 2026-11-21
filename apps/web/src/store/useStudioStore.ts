@@ -34,6 +34,8 @@ export interface StudioState {
   groundMinY: number;
   isReconstructing: boolean;
   reconError: string | null;
+  mapsAttribution: string | null;
+  mapsWarnings: string[];
 
   // Calibration state
   feetPerSceneUnit: number;
@@ -75,6 +77,7 @@ export interface StudioState {
   setDetectedZones: (zones: DetectedZone[]) => void;
   setGroundMinY: (minY: number) => void;
   setReconstructing: (flag: boolean, error?: string | null) => void;
+  setMapsStatus: (attribution: string | null, warnings?: string[]) => void;
   setCalibrating: (flag: boolean, error?: string | null) => void;
   setCalibration: (feetPerSceneUnit: number, source: CalibrationSource) => void;
   addRulerPoint: (pt: Vec3) => void;
@@ -176,6 +179,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   groundMinY: 0,
   isReconstructing: false,
   reconError: null,
+  mapsAttribution: null,
+  mapsWarnings: [],
 
   feetPerSceneUnit: DEFAULT_FEET_PER_SCENE_UNIT,
   calibrationSource: 'DEFAULT',
@@ -210,6 +215,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   setGroundMinY: (groundMinY) => set({ groundMinY }),
   setReconstructing: (isReconstructing, reconError = null) =>
     set({ isReconstructing, reconError }),
+  setMapsStatus: (mapsAttribution, mapsWarnings = []) =>
+    set({ mapsAttribution, mapsWarnings }),
   setCalibrating: (isCalibrating, calibrationError = null) =>
     set({ isCalibrating, calibrationError }),
 

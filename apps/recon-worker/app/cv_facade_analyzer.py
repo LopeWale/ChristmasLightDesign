@@ -79,7 +79,7 @@ def analyze_facade_images(
     overrides = dict(partial_overrides or {})
     valid_bgrs: list[np.ndarray] = []
 
-    for p in image_paths[:6]:
+    for p in image_paths[:12]:
         img = cv2.imread(str(p), cv2.IMREAD_COLOR)
         if img is None or img.size == 0:
             continue
@@ -95,7 +95,21 @@ def analyze_facade_images(
         )
         return base.model_copy(update=overrides) if overrides else base
 
+    # Score all uploaded views/keyframes by edge sharpness & facade coverage so blurry/occluded
+    # early frames do not shadow clear facade views later in a walkaround sequence.
+    best_score = -1.0
     primary = valid_bgrs[0]
+    for candidate in valid_bgrs:
+        c_gray = cv2.cvtColor(candidate, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(c_gray, cv2.CV_32F).var())
+        cx0, cy0, cx1, cy1, _ = _segment_building_bbox(candidate)
+        ch, cw = candidate.shape[:2]
+        area_frac = float(max(1, (cx1 - cx0) * (cy1 - cy0))) / float(max(1, ch * cw))
+        score = sharpness * (area_frac + 0.15)
+        if score > best_score:
+            best_score = score
+            primary = candidate
+
     gray_raw = cv2.cvtColor(primary, cv2.COLOR_BGR2GRAY)
     mean_luma = float(gray_raw.mean())
 
@@ -140,7 +154,11 @@ def analyze_facade_images(
     if aspect_hw < 0.45 and roof_style == "pitched_gable":
         floors = 1
     elif aspect_hw < 0.68:
-        floors = 2 if len(peaks) >= 3 else 1
+        floors = (
+            3
+            if (len(peaks) >= 4 and roof_style == "flat_parapet")
+            else (2 if len(peaks) >= 3 else 1)
+        )
     elif aspect_hw < 0.92:
         floors = 3 if (len(peaks) >= 4 and roof_style == "flat_parapet") else 2
     elif aspect_hw < 1.38:
@@ -149,6 +167,14 @@ def analyze_facade_images(
         floors = max(3, min(6, len(peaks) if len(peaks) >= 3 else 4))
 
     floors = int(np.clip(floors, 1, 8))
+
+    # Apply Google Maps / caller structural overrides BEFORE computing balconies, archetype & garage
+    if overrides.get("roofStyle") in ("flat_parapet", "pitched_gable", "hip"):
+        roof_style = str(overrides["roofStyle"])
+    if overrides.get("roofPitchDegrees") is not None:
+        roof_pitch = float(np.clip(float(overrides["roofPitchDegrees"]), 0.0, 55.0))
+    if overrides.get("floors") is not None:
+        floors = int(np.clip(int(overrides["floors"]), 1, 8))
 
     # Vertical window bay estimation via horizontal Sobel-X projection
     abs_gx = np.abs(cv2.Sobel(body_gray, cv2.CV_32F, 1, 0, ksize=3))
@@ -166,7 +192,11 @@ def analyze_facade_images(
         trim_rgb = (228, 232, 238)
         roof_rgb = (58, 62, 70)
     else:
-        mid_patch = roi_bgr[int(bldg_h * 0.25) : int(bldg_h * 0.80), int(bldg_w * 0.15) : int(bldg_w * 0.85)]
+        y_p0 = int(bldg_h * 0.25)
+        y_p1 = max(y_p0 + 1, int(bldg_h * 0.80))
+        x_p0 = int(bldg_w * 0.15)
+        x_p1 = max(x_p0 + 1, int(bldg_w * 0.85))
+        mid_patch = roi_bgr[y_p0:y_p1, x_p0:x_p1]
         flat_px = mid_patch.reshape(-1, 3)
         luma_px = 0.114 * flat_px[:, 0] + 0.587 * flat_px[:, 1] + 0.299 * flat_px[:, 2]
         # Exclude dark window glass (< 55) and blown highlights (> 240) when sampling wall color
@@ -249,7 +279,7 @@ def analyze_facade_images(
         "trimColorRgb": trim_rgb,
         "roofColorRgb": roof_rgb,
         "windowBaysPerFloor": window_bays,
-        "hasGarage": bool(floors <= 2 and est_width_m >= 12.5),
+        "hasGarage": bool(floors <= 2 and est_width_m >= 12.5 and archetype != "multi_story_condo"),
         "balconies": [b.model_dump() for b in balconies],
         "sourceSummary": f"OpenCV multi-view facade extraction ({floors}F, {len(balconies)} balconies)",
     }

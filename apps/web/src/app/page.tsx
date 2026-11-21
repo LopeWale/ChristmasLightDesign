@@ -42,6 +42,8 @@ export default function HomePage() {
   const calibrationError = useStudioStore((s) => s.calibrationError);
   const runs = useStudioStore((s) => s.runs);
   const groundMinY = useStudioStore((s) => s.groundMinY);
+  const mapsAttribution = useStudioStore((s) => s.mapsAttribution);
+  const mapsWarnings = useStudioStore((s) => s.mapsWarnings);
 
   const telemetry = useMemo(
     () =>
@@ -58,6 +60,7 @@ export default function HomePage() {
   const setCameras = useStudioStore((s) => s.setCameras);
   const setDetectedZones = useStudioStore((s) => s.setDetectedZones);
   const setReconstructing = useStudioStore((s) => s.setReconstructing);
+  const setMapsStatus = useStudioStore((s) => s.setMapsStatus);
   const setCalibrating = useStudioStore((s) => s.setCalibrating);
   const setCalibration = useStudioStore((s) => s.setCalibration);
   const setToolMode = useStudioStore((s) => s.setToolMode);
@@ -110,6 +113,7 @@ export default function HomePage() {
 
   const handleLoadSamplePreset = async (preset: 'condo' | 'house') => {
     try {
+      setMapsStatus(null, []);
       setReconstructing(true, null);
       const resp = await fetch('/api/reconstruct', {
         method: 'POST',
@@ -160,11 +164,37 @@ export default function HomePage() {
 
     try {
       setReconstructing(true, null);
+      const trimmedAddr = streetAddress.trim();
       const formData = new FormData();
       Array.from(fileList).forEach((f) => formData.append('files', f));
       formData.append('mode', 'auto');
-      if (streetAddress.trim()) {
-        formData.append('address', streetAddress.trim());
+      if (trimmedAddr) {
+        formData.append('address', trimmedAddr);
+        fetch('/api/maps/building-context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: trimmedAddr }),
+        })
+          .then(async (r) => {
+            const j = await r.json();
+            if (r.ok) {
+              setMapsStatus(
+                j.streetViewCopyright || 'Map data © Google',
+                Array.isArray(j.warnings) ? j.warnings : []
+              );
+            } else {
+              setMapsStatus(null, [
+                j.error || 'Google Maps lookup unavailable; used photo/video CV.',
+              ]);
+            }
+          })
+          .catch(() => {
+            setMapsStatus(null, [
+              'Google Maps lookup unavailable; used photo/video CV.',
+            ]);
+          });
+      } else {
+        setMapsStatus(null, []);
       }
 
       const resp = await fetch('/api/reconstruct', {
@@ -370,6 +400,25 @@ export default function HomePage() {
           <div className="pointer-events-none absolute bottom-4 right-4 z-10 w-[420px] max-w-[calc(100%-2rem)]">
             <TelemetryHUD telemetry={telemetry} />
           </div>
+
+          {/* Bottom-left Google Maps Attribution & Lookup Warnings */}
+          {(mapsAttribution || mapsWarnings.length > 0) && (
+            <div
+              data-testid="maps-attribution-badge"
+              className="pointer-events-none absolute bottom-4 left-4 z-10 max-w-xs rounded-lg border border-slate-800 bg-slate-950/85 px-2.5 py-1.5 text-[10px] text-slate-300 backdrop-blur"
+            >
+              {mapsAttribution && (
+                <p className="font-medium text-sky-300">
+                  Google Maps · {mapsAttribution}
+                </p>
+              )}
+              {mapsWarnings.map((w, idx) => (
+                <p key={idx} className="text-amber-300">
+                  {w}
+                </p>
+              ))}
+            </div>
+          )}
 
           {/* Empty state welcome card before loading a 3D facade */}
           {!job && !isReconstructing && (
