@@ -22,6 +22,8 @@ export interface CalibrationOverlayProps {
 function formatBadgeText(source: CalibrationSource, feetPerUnit: number): string {
   const ratio = `${feetPerUnit.toFixed(2)} ft/unit`;
   switch (source) {
+    case 'MAPS_3D_TILES':
+      return `1:1 Metric Scale (Google 3D Tiles · ${ratio})`;
     case 'AUTO_DOOR':
       return `Auto-calibrated via Front Door: 6.67 ft (${ratio})`;
     case 'AUTO_GARAGE':
@@ -30,7 +32,7 @@ function formatBadgeText(source: CalibrationSource, feetPerUnit: number): string
       return `Calibrated via 2-Click Ruler (${ratio})`;
     case 'DEFAULT':
     default:
-      return `Metric Default Scale (${ratio})`;
+      return `Metric Scale (${ratio})`;
   }
 }
 
@@ -80,7 +82,8 @@ export function CalibrationOverlay({
   return (
     <div
       data-testid="calibration-overlay"
-      className="pointer-events-auto flex flex-col gap-2 rounded-xl border border-slate-700/80 bg-slate-950/85 px-3.5 py-2.5 text-xs text-slate-200 shadow-xl backdrop-blur-md"
+      style={{ backgroundColor: 'rgba(5, 8, 20, 0.93)' }}
+      className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-white/15 px-3.5 py-2.5 text-xs text-slate-100 shadow-2xl backdrop-blur-xl"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 font-medium text-emerald-300">

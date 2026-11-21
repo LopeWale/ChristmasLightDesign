@@ -89,7 +89,7 @@ export function BuildingAdjuster({
           <input
             type="range"
             min={1}
-            max={6}
+            max={8}
             step={1}
             data-testid="slider-building-floors"
             value={draft.floors}

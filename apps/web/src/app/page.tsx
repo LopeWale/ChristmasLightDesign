@@ -3,20 +3,42 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import * as THREE from 'three';
-import { Sparkles, UploadCloud, Loader2, Building2, Home, MapPin } from 'lucide-react';
+import {
+  Sparkles,
+  Loader2,
+  Building2,
+  Sun,
+  Sunset,
+  Moon,
+  ShoppingBag,
+  Ruler,
+  ChevronDown,
+  FolderOpen,
+} from 'lucide-react';
 import {
   CamerasPayloadSchema,
   CalibrationDetectionResultSchema,
   ReconstructionJobSchema,
   type ArchitecturalBuildingSpec,
 } from '@lumen3d/shared-schemas';
-import { Toolbar } from '@/components/panels/Toolbar';
+import { StudioLauncher } from '@/components/panels/StudioLauncher';
+import { FloatingDock } from '@/components/panels/FloatingDock';
 import { TelemetryHUD } from '@/components/panels/TelemetryHUD';
 import { CopilotDrawer } from '@/components/panels/CopilotDrawer';
+import { BuildingAdjuster } from '@/components/panels/BuildingAdjuster';
 import { CalibrationOverlay } from '@/components/canvas/CalibrationOverlay';
 import { computeDesignTelemetry } from '@/lib/geometry/bomMath';
+import {
+  CLIENT_CONDO_SPEC,
+  CLIENT_HOUSE_SPEC,
+  buildClientProceduralBuilding,
+} from '@/lib/geometry/proceduralBuilding';
 import { calibrateScaleFromDetection } from '@/lib/geometry/raycastCalibration';
-import { useStudioStore } from '@/store/useStudioStore';
+import {
+  loadSamplePresetWithFallback,
+  resolveAddressLaunchAction,
+} from '@/lib/studioLaunchFlow';
+import { useStudioStore, type LightingMode } from '@/store/useStudioStore';
 
 const StudioViewport = dynamic(
   () =>
@@ -25,11 +47,20 @@ const StudioViewport = dynamic(
 );
 
 export default function HomePage() {
-  const uploadInputRef = useRef<HTMLInputElement>(null);
   const sceneGroupRef = useRef<THREE.Group | null>(null);
   const screenshotFnRef = useRef<(() => string) | null>(null);
-  const [streetAddress, setStreetAddress] = useState<string>('');
 
+  const [streetAddress, setStreetAddress] = useState<string>('');
+  const [launcherModalOpen, setLauncherModalOpen] = useState<boolean>(false);
+  const [launcherGuide, setLauncherGuide] = useState<string | null>(null);
+  const [isAdjusterOpen, setIsAdjusterOpen] = useState<boolean>(false);
+  const [isScaleOpen, setIsScaleOpen] = useState<boolean>(false);
+
+  const sceneSource = useStudioStore((s) => s.sceneSource);
+  const sceneTitle = useStudioStore((s) => s.sceneTitle);
+  const proceduralPreset = useStudioStore((s) => s.proceduralPreset);
+  const activeDrawer = useStudioStore((s) => s.activeDrawer);
+  const lightingMode = useStudioStore((s) => s.lightingMode);
   const job = useStudioStore((s) => s.job);
   const cameras = useStudioStore((s) => s.cameras);
   const isReconstructing = useStudioStore((s) => s.isReconstructing);
@@ -45,6 +76,20 @@ export default function HomePage() {
   const mapsAttribution = useStudioStore((s) => s.mapsAttribution);
   const mapsWarnings = useStudioStore((s) => s.mapsWarnings);
 
+  const setJob = useStudioStore((s) => s.setJob);
+  const setTilesScene = useStudioStore((s) => s.setTilesScene);
+  const setProceduralScene = useStudioStore((s) => s.setProceduralScene);
+  const setActiveDrawer = useStudioStore((s) => s.setActiveDrawer);
+  const setLightingMode = useStudioStore((s) => s.setLightingMode);
+  const setCameras = useStudioStore((s) => s.setCameras);
+  const setDetectedZones = useStudioStore((s) => s.setDetectedZones);
+  const setReconstructing = useStudioStore((s) => s.setReconstructing);
+  const setMapsStatus = useStudioStore((s) => s.setMapsStatus);
+  const setCalibrating = useStudioStore((s) => s.setCalibrating);
+  const setCalibration = useStudioStore((s) => s.setCalibration);
+  const setToolMode = useStudioStore((s) => s.setToolMode);
+  const clearRulerPoints = useStudioStore((s) => s.clearRulerPoints);
+
   const telemetry = useMemo(
     () =>
       computeDesignTelemetry({
@@ -56,25 +101,24 @@ export default function HomePage() {
     [runs, feetPerSceneUnit, calibrationSource, groundMinY]
   );
 
-  const setJob = useStudioStore((s) => s.setJob);
-  const setCameras = useStudioStore((s) => s.setCameras);
-  const setDetectedZones = useStudioStore((s) => s.setDetectedZones);
-  const setReconstructing = useStudioStore((s) => s.setReconstructing);
-  const setMapsStatus = useStudioStore((s) => s.setMapsStatus);
-  const setCalibrating = useStudioStore((s) => s.setCalibrating);
-  const setCalibration = useStudioStore((s) => s.setCalibration);
-  const setToolMode = useStudioStore((s) => s.setToolMode);
-  const clearRulerPoints = useStudioStore((s) => s.clearRulerPoints);
+  // Active editable buildingSpec (either from worker job or instant client procedural condo/house)
+  const activeBuildingSpec: ArchitecturalBuildingSpec | null = useMemo(() => {
+    if (job?.buildingSpec) return job.buildingSpec;
+    if (proceduralPreset === 'condo') return CLIENT_CONDO_SPEC;
+    if (proceduralPreset === 'house') return CLIENT_HOUSE_SPEC;
+    return null;
+  }, [job?.buildingSpec, proceduralPreset]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      (window as unknown as { __LUMEN3D_STORE__?: typeof useStudioStore }).__LUMEN3D_STORE__ =
-        useStudioStore;
+      (
+        window as unknown as { __LUMEN3D_STORE__?: typeof useStudioStore }
+      ).__LUMEN3D_STORE__ = useStudioStore;
     }
   }, []);
 
   const pollJobUntilComplete = useCallback(
-    async (jobId: string) => {
+    async (jobId: string, titleOverride?: string) => {
       for (let attempt = 0; attempt < 180; attempt++) {
         const resp = await fetch(
           `/api/reconstruct?jobId=${encodeURIComponent(jobId)}`,
@@ -85,7 +129,7 @@ export default function HomePage() {
           throw new Error(data.error || 'Failed to poll reconstruction job');
         }
         const parsed = ReconstructionJobSchema.parse(data);
-        setJob(parsed);
+        setJob(parsed, titleOverride);
 
         if (parsed.status === 'completed') {
           if (parsed.camerasUrl) {
@@ -97,6 +141,7 @@ export default function HomePage() {
             }
           }
           setReconstructing(false, null);
+          setLauncherModalOpen(false);
           return;
         }
 
@@ -111,27 +156,60 @@ export default function HomePage() {
     [setCameras, setJob, setReconstructing]
   );
 
-  const handleLoadSamplePreset = async (preset: 'condo' | 'house') => {
+  const handleSubmitAddress = async (addr: string) => {
+    setLauncherGuide(null);
+    setReconstructing(true, null);
     try {
-      setMapsStatus(null, []);
-      setReconstructing(true, null);
-      const resp = await fetch('/api/reconstruct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ demo: true, preset }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || 'Failed to launch sample build');
+      const action = await resolveAddressLaunchAction(addr);
+      if (action.kind === 'LOAD_3D_TILES') {
+        setMapsStatus(action.attribution, action.warnings);
+        setTilesScene(action.formattedAddress, action.anchor);
+        setLauncherModalOpen(false);
+        return;
       }
-      const initialJob = ReconstructionJobSchema.parse(data);
-      setJob(initialJob);
-      await pollJobUntilComplete(initialJob.jobId);
+      if (action.kind === 'NEEDS_TILES_API_OR_PHOTOS') {
+        setMapsStatus('Map data © Google', action.warnings);
+        setLauncherGuide(action.message);
+        setReconstructing(false, null);
+        return;
+      }
+      setLauncherGuide(action.message);
+      setReconstructing(false, null);
     } catch (err) {
       setReconstructing(
         false,
-        err instanceof Error ? err.message : 'Sample build failed'
+        err instanceof Error ? err.message : 'Address lookup failed'
       );
+    }
+  };
+
+  const handleLoadSamplePreset = async (preset: 'condo' | 'house') => {
+    setLauncherGuide(null);
+    setMapsStatus(null, []);
+    setReconstructing(true, null);
+    const label =
+      preset === 'condo'
+        ? '3-Story Condo · 2 Balconies'
+        : 'Suburban Gable Residence';
+
+    const outcome = await loadSamplePresetWithFallback(preset);
+    if (outcome.kind === 'CLIENT_PROCEDURAL') {
+      const built = buildClientProceduralBuilding(preset);
+      setCameras(built.cameras);
+      setProceduralScene(preset, label);
+      setLauncherModalOpen(false);
+      return;
+    }
+
+    try {
+      setJob(outcome.job, label);
+      await pollJobUntilComplete(outcome.job.jobId, label);
+    } catch {
+      // Seamless fallback if worker stopped mid-poll
+      const built = buildClientProceduralBuilding(preset);
+      setCameras(built.cameras);
+      setProceduralScene(preset, label);
+      setLauncherModalOpen(false);
     }
   };
 
@@ -143,31 +221,37 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ buildingSpec: spec }),
       });
-      const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.error || 'Failed to rebuild 3D mesh');
+        // Offline worker: rebuild procedurally on client
+        const built = buildClientProceduralBuilding(spec);
+        setCameras(built.cameras);
+        setProceduralScene(
+          spec.floors >= 3 ? 'condo' : 'house',
+          spec.sourceSummary
+        );
+        return;
       }
-      const initialJob = ReconstructionJobSchema.parse(data);
-      setJob(initialJob);
-      await pollJobUntilComplete(initialJob.jobId);
-    } catch (err) {
-      setReconstructing(
-        false,
-        err instanceof Error ? err.message : 'Rebuild failed'
-      );
+      const initialJob = ReconstructionJobSchema.parse(await resp.json());
+      setJob(initialJob, spec.sourceSummary);
+      await pollJobUntilComplete(initialJob.jobId, spec.sourceSummary);
+    } catch {
+      setReconstructing(false, null);
     }
   };
 
-  const handleUploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
+  const handleUploadFiles = async (
+    fileList: FileList,
+    reconMode: 'auto' | 'da3'
+  ) => {
     if (!fileList || fileList.length === 0) return;
+    setLauncherGuide(null);
 
     try {
       setReconstructing(true, null);
       const trimmedAddr = streetAddress.trim();
       const formData = new FormData();
       Array.from(fileList).forEach((f) => formData.append('files', f));
-      formData.append('mode', 'auto');
+      formData.append('mode', reconMode);
       if (trimmedAddr) {
         formData.append('address', trimmedAddr);
         fetch('/api/maps/building-context', {
@@ -182,17 +266,9 @@ export default function HomePage() {
                 j.streetViewCopyright || 'Map data © Google',
                 Array.isArray(j.warnings) ? j.warnings : []
               );
-            } else {
-              setMapsStatus(null, [
-                j.error || 'Google Maps lookup unavailable; used photo/video CV.',
-              ]);
             }
           })
-          .catch(() => {
-            setMapsStatus(null, [
-              'Google Maps lookup unavailable; used photo/video CV.',
-            ]);
-          });
+          .catch(() => {});
       } else {
         setMapsStatus(null, []);
       }
@@ -201,39 +277,43 @@ export default function HomePage() {
         method: 'POST',
         body: formData,
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data.error || 'Upload reconstruction failed');
+        throw new Error(
+          data.error ||
+            'Local Python reconstruction worker is starting up—run `npm run dev` or try an instant 3D model below.'
+        );
       }
       const initialJob = ReconstructionJobSchema.parse(data);
-      setJob(initialJob);
-      await pollJobUntilComplete(initialJob.jobId);
+      const uploadTitle = trimmedAddr || `Uploaded 3D Scan (${fileList.length} file${fileList.length > 1 ? 's' : ''})`;
+      setJob(initialJob, uploadTitle);
+      await pollJobUntilComplete(initialJob.jobId, uploadTitle);
     } catch (err) {
-      setReconstructing(
-        false,
-        err instanceof Error ? err.message : 'Upload reconstruction failed'
-      );
-    } finally {
-      e.target.value = '';
+      const raw = err instanceof Error ? err.message : '';
+      const friendly = raw.includes('fetch failed')
+        ? 'Python reconstruction worker is offline. Run `npm run dev` (auto-bootstraps Python) or launch an instant 3D model below.'
+        : raw || 'Upload reconstruction failed';
+      setReconstructing(false, friendly);
     }
   };
 
   const handleAutoCalibrate = async () => {
-    if (!job || !sceneGroupRef.current || cameras.length === 0) {
-      setCalibrating(false, 'Load a 3D house mesh with camera metadata first.');
+    if (!sceneGroupRef.current || cameras.length === 0) {
+      setCalibrating(false, 'Load a 3D mesh with camera metadata first.');
       return;
     }
 
     try {
       setCalibrating(true, null);
-
-      // Extract front_door world bounding box if present (enables exact mock projection on tall condos too)
       let doorWorldBox:
         | { min: [number, number, number]; max: [number, number, number] }
         | undefined;
       sceneGroupRef.current.updateMatrixWorld(true);
       sceneGroupRef.current.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh && obj.name.toLowerCase().includes('front_door')) {
+        if (
+          (obj as THREE.Mesh).isMesh &&
+          obj.name.toLowerCase().includes('front_door')
+        ) {
           const b = new THREE.Box3().setFromObject(obj);
           if (!b.isEmpty()) {
             doorWorldBox = {
@@ -248,8 +328,8 @@ export default function HomePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          jobId: job.jobId,
-          referenceImageUrl: job.referenceImageUrl,
+          jobId: job?.jobId,
+          referenceImageUrl: job?.referenceImageUrl,
           camera: cameras[0],
           doorWorldBox,
         }),
@@ -285,201 +365,282 @@ export default function HomePage() {
     }
   }, []);
 
+  const showLauncher = sceneSource === 'NONE' || launcherModalOpen;
+
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-studio-bg text-slate-100">
-      {/* Top Studio Header Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-studio-border bg-slate-950/90 px-4">
-        <div className="flex shrink-0 items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 ring-1 ring-amber-400/40">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-tight text-slate-100">
-              Lumen3D Studio
-            </h1>
-            <p className="text-[11px] text-slate-400">
-              Maps-Guided 3D Condo &amp; Home Reconstruction + Night-Bloom Lighting
-            </p>
-          </div>
-        </div>
+    <div className="relative h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
+      {/* 100% Full-Bleed 3D Spatial Viewport */}
+      <div className="fixed inset-0">
+        <StudioViewport
+          onSceneReady={(group) => {
+            sceneGroupRef.current = group;
+          }}
+          onRegisterScreenshot={(fn) => {
+            screenshotFnRef.current = fn;
+          }}
+        />
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex items-center">
-            <MapPin className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-sky-400" />
-            <input
-              type="text"
-              data-testid="input-street-address"
-              value={streetAddress}
-              onChange={(e) => setStreetAddress(e.target.value)}
-              placeholder="Optional Street Address (Google Maps 3D footprint)"
-              className="w-64 rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-8 pr-2.5 text-xs text-slate-100 placeholder:text-slate-500"
-            />
-          </div>
+      {/* Active Studio Floating Glass Islands (Hidden on Initial Onboarding!) */}
+      {sceneSource !== 'NONE' && (
+        <>
+          <header className="pointer-events-none fixed inset-x-4 top-4 z-20 flex flex-wrap items-start justify-between gap-3">
+            {/* Top-Left Island: Brand + Active Building + Scale + Balcony Popover */}
+            <div className="flex flex-col gap-2">
+              <div
+                style={{ backgroundColor: 'rgba(5, 8, 20, 0.92)' }}
+                className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border border-white/15 px-3 py-2 shadow-2xl backdrop-blur-xl"
+              >
+                <div className="flex items-center gap-2 pr-1">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400/20 text-amber-300 ring-1 ring-amber-400/35">
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </span>
+                  <div className="max-w-[220px]">
+                    <div className="truncate text-xs font-semibold text-white">
+                      {sceneTitle || 'Lumen3D Studio'}
+                    </div>
+                  </div>
+                </div>
 
-          <button
-            type="button"
-            data-testid="btn-upload-media"
-            disabled={isReconstructing}
-            onClick={() => uploadInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow hover:bg-sky-400 disabled:opacity-50"
-          >
-            <UploadCloud className="h-3.5 w-3.5" />
-            Upload Photos / Video
-          </button>
+                <div className="h-4 w-px bg-white/12" />
 
-          <button
-            type="button"
-            data-testid="btn-load-sample-condo"
-            disabled={isReconstructing}
-            onClick={() => handleLoadSamplePreset('condo')}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow transition hover:bg-amber-400 disabled:opacity-50"
-          >
-            {isReconstructing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Building2 className="h-3.5 w-3.5" />
-            )}
-            Sample 3F Condo
-          </button>
+                <button
+                  type="button"
+                  data-testid="btn-change-building"
+                  onClick={() => setLauncherModalOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-xl bg-white/[0.06] px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/[0.12]"
+                >
+                  <FolderOpen className="h-3 w-3 text-amber-300" />
+                  Change Building
+                </button>
 
-          <button
-            type="button"
-            data-testid="btn-load-sample-house"
-            disabled={isReconstructing}
-            onClick={() => handleLoadSamplePreset('house')}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
-          >
-            <Home className="h-3.5 w-3.5" />
-            Load Sample House
-          </button>
+                {activeBuildingSpec && sceneSource === 'MESH_RECON' && (
+                  <button
+                    type="button"
+                    data-testid="btn-toggle-building-adjuster"
+                    onClick={() => setIsAdjusterOpen((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-medium transition ${
+                      isAdjusterOpen
+                        ? 'bg-amber-400 text-slate-950 font-semibold'
+                        : 'bg-white/[0.06] text-slate-200 hover:bg-white/[0.12]'
+                    }`}
+                  >
+                    <Building2 className="h-3 w-3" />
+                    Floors &amp; Balconies
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </button>
+                )}
 
-          <input
-            ref={uploadInputRef}
-            data-testid="input-upload-files"
-            type="file"
-            multiple
-            accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime"
-            onChange={handleUploadFiles}
-            className="hidden"
-          />
-        </div>
-      </header>
+                <button
+                  type="button"
+                  data-testid="btn-toggle-scale"
+                  onClick={() => setIsScaleOpen((v) => !v)}
+                  className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-medium transition ${
+                    isScaleOpen
+                      ? 'bg-white/20 text-white'
+                      : 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25'
+                  }`}
+                >
+                  <Ruler className="h-3 w-3" />
+                  {calibrationSource === 'MAPS_3D_TILES'
+                    ? '1:1 Metric (3D Tiles)'
+                    : calibrationSource === 'AUTO_DOOR'
+                      ? 'Door Scale (6.67 ft)'
+                      : 'Scale & Calibrate'}
+                </button>
+              </div>
 
-      {/* Main Studio Body */}
-      <div className="flex min-h-0 flex-1">
-        <Toolbar onRebuildBuildingSpec={handleRebuildBuildingSpec} />
+              {isScaleOpen && (
+                <div className="max-w-lg">
+                  <CalibrationOverlay
+                    feetPerSceneUnit={feetPerSceneUnit}
+                    calibrationSource={calibrationSource}
+                    toolMode={toolMode}
+                    rulerPoints={rulerPoints}
+                    isCalibrating={isCalibrating}
+                    calibrationError={calibrationError}
+                    hasScene={true}
+                    onAutoCalibrate={handleAutoCalibrate}
+                    onSetToolMode={setToolMode}
+                    onClearRulerPoints={clearRulerPoints}
+                    onApplyManualScale={(scale) =>
+                      setCalibration(scale, 'MANUAL_RULER')
+                    }
+                  />
+                </div>
+              )}
 
-        <main className="relative min-w-0 flex-1">
-          <StudioViewport
-            onSceneReady={(group) => {
-              sceneGroupRef.current = group;
-            }}
-            onRegisterScreenshot={(fn) => {
-              screenshotFnRef.current = fn;
-            }}
-          />
+              {isAdjusterOpen && activeBuildingSpec && (
+                <div className="pointer-events-auto w-80 shadow-2xl">
+                  <BuildingAdjuster
+                    spec={activeBuildingSpec}
+                    isReconstructing={isReconstructing}
+                    onRebuildSpec={handleRebuildBuildingSpec}
+                  />
+                </div>
+              )}
+            </div>
 
-          {/* Top-left floating Spatial Calibration Overlay */}
-          <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-xl">
-            <CalibrationOverlay
-              feetPerSceneUnit={feetPerSceneUnit}
-              calibrationSource={calibrationSource}
-              toolMode={toolMode}
-              rulerPoints={rulerPoints}
-              isCalibrating={isCalibrating}
-              calibrationError={calibrationError}
-              hasScene={Boolean(job?.status === 'completed' && job?.glbUrl)}
-              onAutoCalibrate={handleAutoCalibrate}
-              onSetToolMode={setToolMode}
-              onClearRulerPoints={clearRulerPoints}
-              onApplyManualScale={(scale) => setCalibration(scale, 'MANUAL_RULER')}
-            />
-          </div>
+            {/* Top-Center Island: Day / Dusk / Night Sky Switcher */}
+            <div
+              style={{ backgroundColor: 'rgba(5, 8, 20, 0.92)' }}
+              className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/15 p-1 shadow-2xl backdrop-blur-xl"
+            >
+              {(
+                [
+                  { mode: 'DAY', label: 'Day', icon: <Sun className="h-3.5 w-3.5" /> },
+                  {
+                    mode: 'DUSK',
+                    label: 'Dusk',
+                    icon: <Sunset className="h-3.5 w-3.5" />,
+                  },
+                  {
+                    mode: 'NIGHT',
+                    label: 'Night',
+                    icon: <Moon className="h-3.5 w-3.5" />,
+                  },
+                ] as Array<{
+                  mode: LightingMode;
+                  label: string;
+                  icon: React.ReactNode;
+                }>
+              ).map((item) => {
+                const active = lightingMode === item.mode;
+                return (
+                  <button
+                    key={item.mode}
+                    type="button"
+                    data-testid={`lighting-${item.mode.toLowerCase()}`}
+                    onClick={() => setLightingMode(item.mode)}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                      active
+                        ? 'bg-amber-400 font-semibold text-slate-950 shadow-sm'
+                        : 'text-slate-300 hover:bg-white/[0.08] hover:text-white'
+                    }`}
+                  >
+                    {item.icon}
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Bottom-right Live Electrical & Footage Telemetry HUD */}
-          <div className="pointer-events-none absolute bottom-4 right-4 z-10 w-[420px] max-w-[calc(100%-2rem)]">
+            {/* Top-Right Island: On-Demand AI Co-Pilot & Shopping List Triggers */}
+            <div
+              style={{ backgroundColor: 'rgba(5, 8, 20, 0.92)' }}
+              className="pointer-events-auto flex items-center gap-1.5 rounded-2xl border border-white/15 p-1.5 shadow-2xl backdrop-blur-xl"
+            >
+              <button
+                type="button"
+                data-testid="btn-toggle-copilot"
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'COPILOT' ? 'NONE' : 'COPILOT')
+                }
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                  activeDrawer === 'COPILOT'
+                    ? 'bg-amber-400 font-semibold text-slate-950'
+                    : 'text-slate-200 hover:bg-white/[0.08]'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                AI Co-Pilot
+              </button>
+
+              <button
+                type="button"
+                data-testid="btn-toggle-bom"
+                onClick={() =>
+                  setActiveDrawer(activeDrawer === 'BOM' ? 'NONE' : 'BOM')
+                }
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                  activeDrawer === 'BOM'
+                    ? 'bg-amber-400 font-semibold text-slate-950'
+                    : 'text-slate-200 hover:bg-white/[0.08]'
+                }`}
+              >
+                <ShoppingBag className="h-3.5 w-3.5 text-emerald-300" />
+                Shopping List
+                {runs.length > 0 && (
+                  <span className="rounded-full bg-amber-400/20 px-1.5 py-0.2 text-[10px] font-bold text-amber-300">
+                    {runs.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </header>
+
+          {/* Bottom-Center Pascal-Style Floating Tool Dock */}
+          <FloatingDock />
+
+          {/* Responsive High-Contrast Dark Obsidian Telemetry Pill (single DOM instance) */}
+          <div className="pointer-events-none fixed right-4 top-16 z-20 w-[340px] max-w-[calc(100vw-2rem)] xl:bottom-5 xl:right-5 xl:top-auto xl:w-[390px]">
             <TelemetryHUD telemetry={telemetry} />
           </div>
 
-          {/* Bottom-left Google Maps Attribution & Lookup Warnings */}
-          {(mapsAttribution || mapsWarnings.length > 0) && (
-            <div
-              data-testid="maps-attribution-badge"
-              className="pointer-events-none absolute bottom-4 left-4 z-10 max-w-xs rounded-lg border border-slate-800 bg-slate-950/85 px-2.5 py-1.5 text-[10px] text-slate-300 backdrop-blur"
-            >
-              {mapsAttribution && (
-                <p className="font-medium text-sky-300">
-                  Google Maps · {mapsAttribution}
-                </p>
-              )}
-              {mapsWarnings.map((w, idx) => (
-                <p key={idx} className="text-amber-300">
-                  {w}
-                </p>
-              ))}
-            </div>
-          )}
-
-          {/* Empty state welcome card before loading a 3D facade */}
-          {!job && !isReconstructing && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-              <div className="pointer-events-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-950/90 p-6 text-center shadow-2xl backdrop-blur-md">
-                <h2 className="text-base font-bold text-slate-100">
-                  Reconstruct Your 3D Condo or Home Exterior
-                </h2>
-                <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                  Enter an optional street address (Google Maps footprint &amp; roof height) and
-                  upload walkaround photos or MP4/MOV video, or launch the{' '}
-                  <strong>3-Story Condo (2 Balconies)</strong> or{' '}
-                  <strong>Suburban House</strong> presets to start designing in 3D Night-Bloom mode.
-                </p>
-                {reconError && (
-                  <p className="mt-3 rounded-lg bg-rose-950/60 p-2 text-xs text-rose-300">
-                    {reconError}
+          {/* Google Maps Attribution & Warnings Chip (for non-Tile Maps context) */}
+          {sceneSource !== 'MAPS_3D_TILES' &&
+            (mapsAttribution || mapsWarnings.length > 0) && (
+              <div
+                data-testid="maps-attribution-badge"
+                style={{ backgroundColor: 'rgba(5, 8, 20, 0.9)' }}
+                className="pointer-events-none fixed bottom-5 left-5 z-10 max-w-xs rounded-xl border border-white/15 px-3 py-1.5 text-[10px] text-slate-300 backdrop-blur-md"
+              >
+                {mapsAttribution && (
+                  <p className="font-medium text-sky-300">
+                    Google Maps · {mapsAttribution}
                   </p>
                 )}
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleLoadSamplePreset('condo')}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-amber-400"
-                  >
-                    <Building2 className="h-3.5 w-3.5" />
-                    Sample 3-Story Condo (2 Balconies)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleLoadSamplePreset('house')}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                  >
-                    <Home className="h-3.5 w-3.5" />
-                    Sample House
-                  </button>
-                </div>
+                {mapsWarnings.map((w, idx) => (
+                  <p key={idx} className="text-amber-300">
+                    {w}
+                  </p>
+                ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {isReconstructing && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm">
-              <div className="rounded-2xl border border-slate-800 bg-slate-900 px-6 py-5 text-center shadow-2xl">
-                <Loader2 className="mx-auto h-7 w-7 animate-spin text-amber-400" />
-                <p className="mt-3 text-sm font-semibold text-slate-100">
-                  Reconstructing 3D Exterior Mesh…
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Progress: {job?.progress ?? 10}% ({job?.mode ?? 'auto'})
-                </p>
-              </div>
-            </div>
-          )}
-        </main>
+          {/* Slide-Over AI Critique & Hardware BOM Drawer (only mounted when open!) */}
+          <CopilotDrawer
+            telemetry={telemetry}
+            captureNightScreenshot={captureNightScreenshot}
+          />
+        </>
+      )}
 
-        <CopilotDrawer
-          telemetry={telemetry}
-          captureNightScreenshot={captureNightScreenshot}
-        />
-      </div>
+      {/* Centered Progressive Onboarding / Building Switcher Modal */}
+      {showLauncher && (
+        <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]">
+          <StudioLauncher
+            streetAddress={streetAddress}
+            onChangeAddress={setStreetAddress}
+            onSubmitAddress={handleSubmitAddress}
+            onUploadFiles={handleUploadFiles}
+            onLoadSample={handleLoadSamplePreset}
+            isBusy={isReconstructing}
+            guideMessage={launcherGuide}
+            errorMessage={reconError}
+            canDismiss={sceneSource !== 'NONE'}
+            onDismiss={() => setLauncherModalOpen(false)}
+          />
+        </div>
+      )}
+
+      {/* Clean Progress Overlay During Multi-View Reconstruction */}
+      {isReconstructing && sceneSource !== 'NONE' && !launcherModalOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm">
+          <div
+            style={{ backgroundColor: 'rgba(7, 11, 22, 0.95)' }}
+            className="rounded-2xl border border-white/15 px-7 py-5 text-center shadow-2xl"
+          >
+            <Loader2 className="mx-auto h-7 w-7 animate-spin text-amber-400" />
+            <p className="mt-3 text-sm font-semibold text-white">
+              Updating 3D Building…
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {job ? `${job.progress}% (${job.mode})` : 'Preparing geometry'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
