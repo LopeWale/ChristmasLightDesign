@@ -274,6 +274,7 @@ export async function fetchGoogleMapsBuildingContext(
     : null;
 
   // 3. Elevation + Solar API `buildingInsights:findClosest` for metric roof height & pitch
+  let groundElevationM: number | null = null;
   let estimatedHeightMeters: number | null = null;
   let estimatedFloors: number | null = null;
   let roofPitchDegrees: number | null = null;
@@ -291,13 +292,12 @@ export async function fetchGoogleMapsBuildingContext(
       fetchImpl(solarUrl, { headers: commonHeaders, cache: 'no-store' }),
     ]);
 
-    let groundElevationM: number | null = null;
     if (elevResp.ok) {
       const elevData = (await elevResp.json()) as {
         results?: Array<{ elevation?: number }>;
       };
       if (typeof elevData.results?.[0]?.elevation === 'number') {
-        groundElevationM = elevData.results[0].elevation;
+        groundElevationM = Math.round(elevData.results[0].elevation * 100) / 100;
       }
     }
 
@@ -351,6 +351,7 @@ export async function fetchGoogleMapsBuildingContext(
       footprintPolygonMeters && footprintPolygonMeters.length >= 3
         ? footprintPolygonMeters
         : null,
+    groundElevationMeters: groundElevationM,
     streetFacingHeadingDeg:
       streetBearingDeg !== null ? Math.round(streetBearingDeg * 10) / 10 : null,
     estimatedHeightMeters,
