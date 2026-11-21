@@ -4,9 +4,9 @@ import {
   buildClientProceduralBuilding,
   classifyHitSurfaceMaterial,
   computeTilesGroundLevelOffset,
+  createTintedGlbMaterial,
   CLIENT_CONDO_SPEC,
 } from '../src/lib/geometry/proceduralBuilding';
-import { createTintedGlbMaterial } from '../src/components/canvas/HouseMesh';
 import { useStudioStore } from '../src/store/useStudioStore';
 
 describe('Task 3: Client Procedural Fallback, 3D Tile Surface Classifier & Scene Source Store', () => {

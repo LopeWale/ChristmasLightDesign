@@ -8,8 +8,10 @@ function preloadRootEnvOnce(): void {
     path.resolve(process.cwd(), '../../.env'),
   ];
   for (const envPath of candidates) {
-    if (!fs.existsSync(envPath)) continue;
-    const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+    if (!fs.existsSync(/*turbopackIgnore: true*/ envPath)) continue;
+    const lines = fs
+      .readFileSync(/*turbopackIgnore: true*/ envPath, 'utf8')
+      .split(/\r?\n/);
     for (const rawLine of lines) {
       const line = rawLine.trim();
       if (!line || line.startsWith('#')) continue;

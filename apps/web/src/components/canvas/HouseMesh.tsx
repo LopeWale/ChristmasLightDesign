@@ -13,10 +13,12 @@ import {
 import {
   buildClientProceduralBuilding,
   classifyHitSurfaceMaterial,
+  createTintedGlbMaterial,
+  getLightingTint,
   inferSurfaceMaterialFromName,
 } from '@/lib/geometry/proceduralBuilding';
 
-export { inferSurfaceMaterialFromName };
+export { inferSurfaceMaterialFromName, getLightingTint, createTintedGlbMaterial };
 
 export interface HoverHitInfo {
   point: Vec3;
@@ -29,44 +31,6 @@ export interface HouseMeshProps {
   lightingMode: LightingMode;
   onSceneLoaded: (group: THREE.Group, minY: number, bounds: THREE.Box3) => void;
   onHoverHit: (info: HoverHitInfo | null) => void;
-}
-
-export function getLightingTint(mode: LightingMode): THREE.Color {
-  switch (mode) {
-    case 'DAY':
-      return new THREE.Color('#ffffff');
-    case 'DUSK':
-      return new THREE.Color('#a6a8ce');
-    case 'NIGHT':
-    default:
-      return new THREE.Color('#647ca8');
-  }
-}
-
-export function createTintedGlbMaterial(
-  origMaterial: THREE.Material | THREE.Material[] | null | undefined,
-  hasVertexColors: boolean,
-  lightingMode: LightingMode
-): THREE.MeshStandardMaterial {
-  const primary = Array.isArray(origMaterial) ? origMaterial[0] : origMaterial;
-  const stdOrig = primary as THREE.MeshStandardMaterial | undefined;
-  const origMap = stdOrig?.map ?? null;
-
-  if (origMap) {
-    origMap.colorSpace = THREE.SRGBColorSpace;
-    origMap.anisotropy = 8;
-  }
-
-  return new THREE.MeshStandardMaterial({
-    color: getLightingTint(lightingMode),
-    map: origMap,
-    normalMap: stdOrig?.normalMap ?? null,
-    roughnessMap: stdOrig?.roughnessMap ?? null,
-    metalnessMap: stdOrig?.metalnessMap ?? null,
-    vertexColors: origMap ? false : hasVertexColors,
-    roughness: typeof stdOrig?.roughness === 'number' ? stdOrig.roughness : 0.8,
-    metalness: typeof stdOrig?.metalness === 'number' ? stdOrig.metalness : 0.07,
-  });
 }
 
 function extractNearbyMeshTriangles(

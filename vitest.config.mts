@@ -17,8 +17,11 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@lumen3d/shared-schemas': path.resolve(__dirname, 'packages/shared-schemas/src/index.ts'),
-      '@': path.resolve(__dirname, 'apps/web/src'),
+      '@lumen3d/shared-schemas': path.resolve(
+        import.meta.dirname,
+        'packages/shared-schemas/src/index.ts'
+      ),
+      '@': path.resolve(import.meta.dirname, 'apps/web/src'),
     },
   },
 });
