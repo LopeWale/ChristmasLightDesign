@@ -15,6 +15,9 @@ import {
   BalconySpecSchema,
   ArchitecturalBuildingSpecSchema,
   MapsBuildingContextSchema,
+  CalibrationSourceSchema,
+  SceneSourceModeSchema,
+  ReconstructionModeSchema,
 } from '../src/index';
 
 describe('shared-schemas core contracts', () => {
@@ -384,11 +387,17 @@ describe('shared-schemas core contracts', () => {
       jobId: 'condo-job-1',
       status: 'completed',
       progress: 100,
-      mode: 'auto',
-      backendUsed: 'architectural',
+      mode: 'da3',
+      backendUsed: 'da3',
       glbUrl: '/jobs/condo-job-1/artifacts/scene.glb',
+      splatUrl: '/jobs/condo-job-1/artifacts/scene.splat',
       buildingSpec: condoSpec,
     });
     expect(archJob.buildingSpec?.floors).toBe(3);
+    expect(archJob.splatUrl).toContain('scene.splat');
+    expect(CalibrationSourceSchema.parse('MAPS_3D_TILES')).toBe('MAPS_3D_TILES');
+    expect(SceneSourceModeSchema.parse('MAPS_3D_TILES')).toBe('MAPS_3D_TILES');
+    expect(ReconstructionModeSchema.parse('da3')).toBe('da3');
+    expect(mapsCtx.groundElevationMeters).toBeNull();
   });
 });

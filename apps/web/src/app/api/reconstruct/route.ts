@@ -27,6 +27,9 @@ function rewriteJobUrls(job: ReconstructionJob): ReconstructionJob {
   return {
     ...job,
     glbUrl: job.glbUrl ? `/api/reconstruct?jobId=${id}&artifact=scene.glb` : undefined,
+    splatUrl: job.splatUrl
+      ? `/api/reconstruct?jobId=${id}&artifact=scene.splat`
+      : undefined,
     camerasUrl: job.camerasUrl
       ? `/api/reconstruct?jobId=${id}&artifact=cameras.json`
       : undefined,

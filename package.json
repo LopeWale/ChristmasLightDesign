@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:python": "apps/recon-worker/.venv/bin/pytest apps/recon-worker/tests",
     "test:e2e": "npm run test:e2e --workspace=@lumen3d/web",
-    "dev:worker": "cd apps/recon-worker && ./.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload",
+    "dev:worker": "bash scripts/dev-worker.sh",
     "dev:web": "npm run dev --workspace=@lumen3d/web",
     "dev": "concurrently -n worker,web -c cyan,magenta \"npm run dev:worker\" \"npm run dev:web\""
   },

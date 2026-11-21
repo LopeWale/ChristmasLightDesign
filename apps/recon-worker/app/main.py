@@ -23,6 +23,7 @@ SAFE_JOB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 ARTIFACT_MEDIA_TYPES = {
     ".glb": "model/gltf-binary",
+    ".splat": "application/octet-stream",
     ".json": "application/json",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -102,6 +103,11 @@ def create_app() -> FastAPI:
                 progress=100,
                 backendUsed=result.backend_used,
                 glbUrl=f"/jobs/{job_id}/artifacts/{result.glb_path.name}",
+                splatUrl=(
+                    f"/jobs/{job_id}/artifacts/{result.splat_path.name}"
+                    if result.splat_path is not None
+                    else None
+                ),
                 camerasUrl=f"/jobs/{job_id}/artifacts/{result.cameras_path.name}",
                 referenceImageUrl=f"/jobs/{job_id}/artifacts/{result.reference_image_path.name}",
                 meshStats=result.mesh_stats,
@@ -169,7 +175,7 @@ def create_app() -> FastAPI:
         spec_json: str = Form(default=""),
     ) -> ReconstructionJob:
         effective_mode_raw = (mode or os.environ.get("RECON_BACKEND") or "auto").strip().lower()
-        if effective_mode_raw not in ("auto", "vggt", "synthetic", "architectural"):
+        if effective_mode_raw not in ("auto", "da3", "vggt", "synthetic", "architectural"):
             raise HTTPException(status_code=400, detail=f"Invalid mode: {effective_mode_raw}")
 
         parsed_spec: dict[str, Any] | None = None

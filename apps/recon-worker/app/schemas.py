@@ -63,7 +63,7 @@ class ArchitecturalBuildingSpecModel(BaseModel):
     sourceSummary: str = "Parametric 3D architectural model"
 
 
-ReconstructionMode = Literal["auto", "vggt", "synthetic", "architectural"]
+ReconstructionMode = Literal["auto", "da3", "vggt", "synthetic", "architectural"]
 JobStatus = Literal["queued", "processing", "completed", "failed"]
 
 
@@ -71,9 +71,10 @@ class ReconstructionJob(BaseModel):
     jobId: str
     status: JobStatus
     progress: int = Field(ge=0, le=100)
-    mode: Literal["auto", "vggt", "synthetic"]
-    backendUsed: Optional[Literal["vggt", "synthetic", "architectural"]] = None
+    mode: Literal["auto", "da3", "vggt", "synthetic"]
+    backendUsed: Optional[Literal["vggt", "synthetic", "architectural", "da3"]] = None
     glbUrl: Optional[str] = None
+    splatUrl: Optional[str] = None
     camerasUrl: Optional[str] = None
     referenceImageUrl: Optional[str] = None
     meshStats: Optional[SceneMetadata] = None

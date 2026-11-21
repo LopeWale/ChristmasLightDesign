@@ -147,9 +147,17 @@ export const CalibrationSourceSchema = z.enum([
   'AUTO_DOOR',
   'AUTO_GARAGE',
   'MANUAL_RULER',
+  'MAPS_3D_TILES',
   'DEFAULT',
 ]);
 export type CalibrationSource = z.infer<typeof CalibrationSourceSchema>;
+
+export const SceneSourceModeSchema = z.enum([
+  'NONE',
+  'MAPS_3D_TILES',
+  'MESH_RECON',
+]);
+export type SceneSourceMode = z.infer<typeof SceneSourceModeSchema>;
 
 export const RunTelemetrySchema = z.object({
   id: z.string(),
@@ -217,7 +225,12 @@ export const CamerasPayloadSchema = z.object({
 });
 export type CamerasPayload = z.infer<typeof CamerasPayloadSchema>;
 
-export const ReconstructionModeSchema = z.enum(['auto', 'vggt', 'synthetic']);
+export const ReconstructionModeSchema = z.enum([
+  'auto',
+  'da3',
+  'vggt',
+  'synthetic',
+]);
 export type ReconstructionMode = z.infer<typeof ReconstructionModeSchema>;
 
 export const ReconstructionJobStatusSchema = z.enum([
@@ -296,6 +309,11 @@ export const MapsBuildingContextSchema = z.object({
     .array(z.tuple([z.number().finite(), z.number().finite()]))
     .min(3)
     .nullable(),
+  groundElevationMeters: z
+    .number()
+    .finite()
+    .nullish()
+    .transform((v) => v ?? null),
   streetFacingHeadingDeg: z.number().finite().nullable(),
   estimatedHeightMeters: z.number().positive().nullable(),
   estimatedFloors: z.number().int().min(1).max(8).nullable(),
@@ -316,10 +334,14 @@ export const ReconstructionJobSchema = z.object({
   progress: z.number().min(0).max(100),
   mode: ReconstructionModeSchema,
   backendUsed: z
-    .enum(['vggt', 'synthetic', 'architectural'])
+    .enum(['vggt', 'synthetic', 'architectural', 'da3'])
     .nullish()
     .transform((v) => v ?? undefined),
   glbUrl: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  splatUrl: z
     .string()
     .nullish()
     .transform((v) => v ?? undefined),
