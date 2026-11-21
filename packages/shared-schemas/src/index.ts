@@ -89,6 +89,8 @@ export const SurfaceMaterialSchema = z.enum([
   'vinyl_siding',
   'stucco',
   'column_post',
+  'balcony_railing',
+  'balcony_soffit',
   'foliage_shrub',
   'ground_turf',
   'unknown',
@@ -226,13 +228,91 @@ export const ReconstructionJobStatusSchema = z.enum([
 ]);
 export type ReconstructionJobStatus = z.infer<typeof ReconstructionJobStatusSchema>;
 
+export const BalconyWallFaceSchema = z.enum(['front', 'left', 'right', 'rear']);
+export type BalconyWallFace = z.infer<typeof BalconyWallFaceSchema>;
+
+export const BalconyMountStyleSchema = z.enum(['cantilevered', 'recessed']);
+export type BalconyMountStyle = z.infer<typeof BalconyMountStyleSchema>;
+
+export const BalconyRailingTypeSchema = z.enum([
+  'metal_picket',
+  'glass_panel',
+  'solid_parapet',
+]);
+export type BalconyRailingType = z.infer<typeof BalconyRailingTypeSchema>;
+
+export const BalconySpecSchema = z.object({
+  id: z.string().min(1),
+  floor: z.number().int().min(1).max(8),
+  wallFace: BalconyWallFaceSchema,
+  centerOffsetNorm: z.number().min(-0.45).max(0.45),
+  widthMeters: z.number().min(0.8).max(20.0),
+  depthMeters: z.number().min(0.4).max(6.0),
+  mountStyle: BalconyMountStyleSchema,
+  railingType: BalconyRailingTypeSchema,
+});
+export type BalconySpec = z.infer<typeof BalconySpecSchema>;
+
+export const RgbTupleSchema = z.tuple([
+  z.number().int().min(0).max(255),
+  z.number().int().min(0).max(255),
+  z.number().int().min(0).max(255),
+]);
+export type RgbTuple = z.infer<typeof RgbTupleSchema>;
+
+export const ArchitecturalBuildingSpecSchema = z.object({
+  archetype: z.enum([
+    'multi_story_condo',
+    'townhouse',
+    'single_family_gable',
+    'modern_box',
+  ]),
+  floors: z.number().int().min(1).max(8),
+  metersPerFloor: z.number().min(2.4).max(5.0).default(3.05),
+  footprintPolygonMeters: z
+    .array(z.tuple([z.number().finite(), z.number().finite()]))
+    .min(3),
+  roofStyle: z.enum(['flat_parapet', 'pitched_gable', 'hip']),
+  roofPitchDegrees: z.number().min(0).max(55),
+  wallColorRgb: RgbTupleSchema,
+  trimColorRgb: RgbTupleSchema,
+  roofColorRgb: RgbTupleSchema,
+  windowBaysPerFloor: z.number().int().min(1).max(12),
+  hasGarage: z.boolean(),
+  balconies: z.array(BalconySpecSchema),
+  sourceSummary: z.string(),
+});
+export type ArchitecturalBuildingSpec = z.infer<
+  typeof ArchitecturalBuildingSpecSchema
+>;
+
+export const MapsBuildingContextSchema = z.object({
+  formattedAddress: z.string().min(1),
+  location: z.object({
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+  }),
+  footprintPolygonMeters: z
+    .array(z.tuple([z.number().finite(), z.number().finite()]))
+    .min(3)
+    .nullable(),
+  streetFacingHeadingDeg: z.number().finite().nullable(),
+  estimatedHeightMeters: z.number().positive().nullable(),
+  estimatedFloors: z.number().int().min(1).max(8).nullable(),
+  roofPitchDegrees: z.number().min(0).max(55).nullable(),
+  streetViewBase64: z.string().nullable(),
+  streetViewCopyright: z.string().nullable(),
+  warnings: z.array(z.string()),
+});
+export type MapsBuildingContext = z.infer<typeof MapsBuildingContextSchema>;
+
 export const ReconstructionJobSchema = z.object({
   jobId: z.string().min(1),
   status: ReconstructionJobStatusSchema,
   progress: z.number().min(0).max(100),
   mode: ReconstructionModeSchema,
   backendUsed: z
-    .enum(['vggt', 'synthetic'])
+    .enum(['vggt', 'synthetic', 'architectural'])
     .nullish()
     .transform((v) => v ?? undefined),
   glbUrl: z
@@ -248,6 +328,9 @@ export const ReconstructionJobSchema = z.object({
     .nullish()
     .transform((v) => v ?? undefined),
   meshStats: SceneMetadataSchema.nullish().transform((v) => v ?? undefined),
+  buildingSpec: ArchitecturalBuildingSpecSchema.nullish().transform(
+    (v) => v ?? undefined
+  ),
   error: z
     .string()
     .nullish()

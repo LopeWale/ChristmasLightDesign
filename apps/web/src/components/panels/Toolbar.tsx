@@ -43,6 +43,8 @@ const SURFACE_MATERIALS: SurfaceMaterial[] = [
   'vinyl_siding',
   'stucco',
   'column_post',
+  'balcony_railing',
+  'balcony_soffit',
   'foliage_shrub',
   'ground_turf',
   'unknown',

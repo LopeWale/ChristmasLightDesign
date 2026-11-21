@@ -12,6 +12,9 @@ import {
   CalibrationDetectionResultSchema,
   CritiqueReportSchema,
   BOMReportSchema,
+  BalconySpecSchema,
+  ArchitecturalBuildingSpecSchema,
+  MapsBuildingContextSchema,
 } from '../src/index';
 
 describe('shared-schemas core contracts', () => {
@@ -298,5 +301,94 @@ describe('shared-schemas core contracts', () => {
       ],
     });
     expect(bom.spools[0].quantityToPurchase).toBe(2);
+  });
+
+  it('validates BalconySpec, ArchitecturalBuildingSpec, MapsBuildingContext, and balcony SurfaceMaterials', () => {
+    expect(SurfaceMaterialSchema.parse('balcony_railing')).toBe('balcony_railing');
+    expect(SurfaceMaterialSchema.parse('balcony_soffit')).toBe('balcony_soffit');
+
+    const b1 = BalconySpecSchema.parse({
+      id: 'balcony-2f',
+      floor: 2,
+      wallFace: 'front',
+      centerOffsetNorm: -0.18,
+      widthMeters: 3.2,
+      depthMeters: 1.4,
+      mountStyle: 'cantilevered',
+      railingType: 'metal_picket',
+    });
+    expect(b1.railingType).toBe('metal_picket');
+
+    const condoSpec = ArchitecturalBuildingSpecSchema.parse({
+      archetype: 'multi_story_condo',
+      floors: 3,
+      metersPerFloor: 3.05,
+      footprintPolygonMeters: [
+        [-6, -5],
+        [6, -5],
+        [6, 5],
+        [-6, 5],
+      ],
+      roofStyle: 'flat_parapet',
+      roofPitchDegrees: 2,
+      wallColorRgb: [176, 118, 96],
+      trimColorRgb: [236, 238, 242],
+      roofColorRgb: [58, 62, 70],
+      windowBaysPerFloor: 4,
+      hasGarage: false,
+      balconies: [
+        b1,
+        {
+          id: 'balcony-3f',
+          floor: 3,
+          wallFace: 'front',
+          centerOffsetNorm: 0.18,
+          widthMeters: 3.2,
+          depthMeters: 1.4,
+          mountStyle: 'recessed',
+          railingType: 'glass_panel',
+        },
+      ],
+      sourceSummary: 'Google Maps footprint + Gemini 3-story condo extraction',
+    });
+    expect(condoSpec.floors).toBe(3);
+    expect(condoSpec.balconies).toHaveLength(2);
+
+    expect(() =>
+      ArchitecturalBuildingSpecSchema.parse({ ...condoSpec, floors: 0 })
+    ).toThrow();
+    expect(() =>
+      ArchitecturalBuildingSpecSchema.parse({ ...condoSpec, floors: 12 })
+    ).toThrow();
+
+    const mapsCtx = MapsBuildingContextSchema.parse({
+      formattedAddress: '123 Harbor View Ave, Chicago, IL 60601, USA',
+      location: { latitude: 41.886, longitude: -87.618 },
+      footprintPolygonMeters: [
+        [-6, -5],
+        [6, -5],
+        [6, 5],
+        [-6, 5],
+      ],
+      streetFacingHeadingDeg: 180,
+      estimatedHeightMeters: 9.4,
+      estimatedFloors: 3,
+      roofPitchDegrees: 1.5,
+      streetViewBase64: null,
+      streetViewCopyright: '© Google',
+      warnings: [],
+    });
+    expect(mapsCtx.estimatedFloors).toBe(3);
+
+    const archJob = ReconstructionJobSchema.parse({
+      jobId: 'condo-job-1',
+      status: 'completed',
+      progress: 100,
+      mode: 'auto',
+      backendUsed: 'architectural',
+      glbUrl: '/jobs/condo-job-1/artifacts/scene.glb',
+      buildingSpec: condoSpec,
+    });
+    expect(archJob.buildingSpec?.floors).toBe(3);
   });
 });

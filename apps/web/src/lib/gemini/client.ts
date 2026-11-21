@@ -76,6 +76,8 @@ export const SURFACE_MATERIAL_ENUM_VALUES = [
   'vinyl_siding',
   'stucco',
   'column_post',
+  'balcony_railing',
+  'balcony_soffit',
   'foliage_shrub',
   'ground_turf',
   'unknown',
