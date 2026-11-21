@@ -12,6 +12,7 @@ import {
   type LightPattern,
   type LightRun,
   type ReconstructionJob,
+  type SceneSourceMode,
   type SurfaceMaterial,
   type ToolMode,
   type Vec3,
@@ -23,11 +24,23 @@ import {
 } from '@/lib/geometry/splineGenerators';
 
 export type LightingMode = 'DAY' | 'DUSK' | 'NIGHT';
+export type ActiveDrawer = 'NONE' | 'COPILOT' | 'BOM';
+
+export interface TilesAnchor {
+  lat: number;
+  lng: number;
+  height: number;
+}
 
 const MAX_HISTORY = 40;
 
 export interface StudioState {
   // Reconstruction & Scene state
+  sceneSource: SceneSourceMode;
+  sceneTitle: string;
+  tilesAnchor: TilesAnchor | null;
+  proceduralPreset: 'condo' | 'house' | null;
+  activeDrawer: ActiveDrawer;
   job: ReconstructionJob | null;
   cameras: CameraPose[];
   detectedZones: DetectedZone[];
@@ -72,7 +85,11 @@ export interface StudioState {
   futureRuns: LightRun[][];
 
   // Actions — Scene & Calibration
-  setJob: (job: ReconstructionJob | null) => void;
+  setJob: (job: ReconstructionJob | null, title?: string) => void;
+  setTilesScene: (title: string, anchor: TilesAnchor) => void;
+  setProceduralScene: (preset: 'condo' | 'house', title?: string) => void;
+  resetToLauncher: () => void;
+  setActiveDrawer: (drawer: ActiveDrawer) => void;
   setCameras: (cameras: CameraPose[]) => void;
   setDetectedZones: (zones: DetectedZone[]) => void;
   setGroundMinY: (minY: number) => void;
@@ -173,6 +190,11 @@ function defaultRunLabel(toolMode: ToolMode, index: number): string {
 }
 
 export const useStudioStore = create<StudioState>((set, get) => ({
+  sceneSource: 'NONE',
+  sceneTitle: '',
+  tilesAnchor: null,
+  proceduralPreset: null,
+  activeDrawer: 'NONE',
   job: null,
   cameras: [],
   detectedZones: [],
@@ -209,7 +231,62 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   pastRuns: [],
   futureRuns: [],
 
-  setJob: (job) => set({ job }),
+  setJob: (job, title) =>
+    set((state) => ({
+      job,
+      proceduralPreset: null,
+      tilesAnchor: null,
+      sceneSource: job ? 'MESH_RECON' : state.sceneSource,
+      sceneTitle:
+        title !== undefined
+          ? title
+          : job?.buildingSpec?.sourceSummary || state.sceneTitle || '3D Exterior Model',
+    })),
+  setTilesScene: (sceneTitle, tilesAnchor) =>
+    set({
+      sceneSource: 'MAPS_3D_TILES',
+      sceneTitle,
+      tilesAnchor,
+      proceduralPreset: null,
+      job: null,
+      groundMinY: 0,
+      feetPerSceneUnit: DEFAULT_FEET_PER_SCENE_UNIT,
+      calibrationSource: 'MAPS_3D_TILES',
+      isReconstructing: false,
+      reconError: null,
+    }),
+  setProceduralScene: (preset, title) =>
+    set({
+      sceneSource: 'MESH_RECON',
+      sceneTitle:
+        title ||
+        (preset === 'condo'
+          ? '3-Story Condo · 2 Balconies'
+          : 'Suburban Gable Residence'),
+      proceduralPreset: preset,
+      tilesAnchor: null,
+      job: null,
+      groundMinY: 0,
+      feetPerSceneUnit: DEFAULT_FEET_PER_SCENE_UNIT,
+      calibrationSource: 'AUTO_DOOR',
+      isReconstructing: false,
+      reconError: null,
+    }),
+  resetToLauncher: () =>
+    set({
+      sceneSource: 'NONE',
+      sceneTitle: '',
+      tilesAnchor: null,
+      proceduralPreset: null,
+      activeDrawer: 'NONE',
+      job: null,
+      isReconstructing: false,
+      reconError: null,
+      draftPoints: [],
+      draftScatterTriangles: [],
+      isPaintingScatter: false,
+    }),
+  setActiveDrawer: (activeDrawer) => set({ activeDrawer }),
   setCameras: (cameras) => set({ cameras }),
   setDetectedZones: (detectedZones) => set({ detectedZones }),
   setGroundMinY: (groundMinY) => set({ groundMinY }),

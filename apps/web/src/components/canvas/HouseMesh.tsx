@@ -1,15 +1,22 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { ThreeEvent } from '@react-three/fiber';
-import type { SurfaceMaterial, Vec3 } from '@lumen3d/shared-schemas';
+import type { ArchitecturalBuildingSpec, SurfaceMaterial, Vec3 } from '@lumen3d/shared-schemas';
 import { useStudioStore, type LightingMode } from '@/store/useStudioStore';
 import {
   offsetPointAlongNormal,
   type SurfaceTriangle,
 } from '@/lib/geometry/splineGenerators';
+import {
+  buildClientProceduralBuilding,
+  classifyHitSurfaceMaterial,
+  inferSurfaceMaterialFromName,
+} from '@/lib/geometry/proceduralBuilding';
+
+export { inferSurfaceMaterialFromName };
 
 export interface HoverHitInfo {
   point: Vec3;
@@ -24,38 +31,15 @@ export interface HouseMeshProps {
   onHoverHit: (info: HoverHitInfo | null) => void;
 }
 
-export function inferSurfaceMaterialFromName(rawName: string): SurfaceMaterial {
-  const n = rawName.toLowerCase();
-  if (n.includes('balcony_railing') || n.includes('railing') || n.includes('guardrail'))
-    return 'balcony_railing';
-  if (n.includes('balcony_soffit') || n.includes('soffit')) return 'balcony_soffit';
-  if (n.includes('balcony_slab')) return 'stucco';
-  if (n.includes('roof') || n.includes('shingle')) return 'asphalt_shingle';
-  if (n.includes('eave') || n.includes('gutter')) return 'metal_gutter';
-  if (n.includes('door') && !n.includes('garage')) return 'wood_fascia';
-  if (n.includes('window') || n.includes('fascia')) return 'wood_fascia';
-  if (n.includes('garage')) return 'vinyl_siding';
-  if (n.includes('column') || n.includes('pillar') || n.includes('post'))
-    return 'column_post';
-  if (n.includes('shrub') || n.includes('bush') || n.includes('tree') || n.includes('foliage'))
-    return 'foliage_shrub';
-  if (n.includes('ground') || n.includes('turf') || n.includes('walkway'))
-    return 'ground_turf';
-  if (n.includes('stucco')) return 'stucco';
-  if (n.includes('wall') || n.includes('brick')) return 'brick_masonry';
-  return 'unknown';
-}
-
-function getLightingTint(mode: LightingMode): THREE.Color {
+export function getLightingTint(mode: LightingMode): THREE.Color {
   switch (mode) {
     case 'DAY':
       return new THREE.Color('#ffffff');
     case 'DUSK':
-      return new THREE.Color('#9ea2c8');
+      return new THREE.Color('#a6a8ce');
     case 'NIGHT':
     default:
-      // Cool-blue darkened moonlight material tint for Night mode
-      return new THREE.Color('#425982');
+      return new THREE.Color('#47608c');
   }
 }
 
@@ -121,14 +105,9 @@ function extractNearbyMeshTriangles(
   return out;
 }
 
-export function HouseMesh({
-  glbUrl,
-  lightingMode,
-  onSceneLoaded,
-  onHoverHit,
-}: HouseMeshProps) {
-  const [loadedGroup, setLoadedGroup] = useState<THREE.Group | null>(null);
-  const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+export function useSurfacePointerHandlers(
+  onHoverHit: (info: HoverHitInfo | null) => void
+) {
   const lastScatterSampleRef = useRef<THREE.Vector3 | null>(null);
 
   const toolMode = useStudioStore((s) => s.toolMode);
@@ -142,87 +121,16 @@ export function HouseMesh({
   const runs = useStudioStore((s) => s.runs);
   const selectRun = useStudioStore((s) => s.selectRun);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loader = new GLTFLoader();
-
-    loader.load(
-      glbUrl,
-      (gltf) => {
-        if (cancelled) return;
-        const root = gltf.scene;
-        const mats: THREE.MeshStandardMaterial[] = [];
-
-        root.traverse((obj) => {
-          if ((obj as THREE.Mesh).isMesh) {
-            const mesh = obj as THREE.Mesh;
-            if (!mesh.geometry.getAttribute('normal')) {
-              mesh.geometry.computeVertexNormals();
-            }
-            const hasVertexColors = Boolean(mesh.geometry.getAttribute('color'));
-            const stdMat = new THREE.MeshStandardMaterial({
-              color: getLightingTint(lightingMode),
-              vertexColors: hasVertexColors,
-              roughness: 0.82,
-              metalness: 0.06,
-            });
-            mesh.material = stdMat;
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            mats.push(stdMat);
-          }
-        });
-
-        root.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(root);
-        const minY = Number.isFinite(box.min.y) ? box.min.y : 0;
-
-        materialsRef.current = mats;
-        setLoadedGroup((prev) => {
-          if (prev) {
-            prev.traverse((oldObj) => {
-              if ((oldObj as THREE.Mesh).isMesh) {
-                const m = oldObj as THREE.Mesh;
-                m.geometry?.dispose();
-                if (Array.isArray(m.material)) {
-                  m.material.forEach((mat) => mat.dispose());
-                } else {
-                  m.material?.dispose();
-                }
-              }
-            });
-          }
-          return root;
-        });
-        onSceneLoaded(root, minY, box);
-      },
-      undefined,
-      (err) => {
-        console.error('Failed to load scene.glb:', err);
-      }
-    );
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glbUrl]);
-
-  useEffect(() => {
-    const tint = getLightingTint(lightingMode);
-    for (const mat of materialsRef.current) {
-      mat.color.copy(tint);
-      mat.needsUpdate = true;
-    }
-  }, [lightingMode]);
-
-  const computeHitWorldNormal = (e: ThreeEvent<PointerEvent | MouseEvent>): Vec3 => {
+  const computeHitWorldNormalVec = (
+    e: ThreeEvent<PointerEvent | MouseEvent>
+  ): THREE.Vector3 => {
     if (e.face && e.object) {
-      const normalMatrix = new THREE.Matrix3().getNormalMatrix(e.object.matrixWorld);
-      const worldNormal = e.face.normal.clone().applyMatrix3(normalMatrix).normalize();
-      return [worldNormal.x, worldNormal.y, worldNormal.z];
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(
+        e.object.matrixWorld
+      );
+      return e.face.normal.clone().applyMatrix3(normalMatrix).normalize();
     }
-    return [0, 1, 0];
+    return new THREE.Vector3(0, 1, 0);
   };
 
   const resolveMeshHierarchyName = (obj: THREE.Object3D | null): string => {
@@ -237,9 +145,10 @@ export function HouseMesh({
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    const worldNormal = computeHitWorldNormal(e);
+    const nVec = computeHitWorldNormalVec(e);
+    const worldNormal: Vec3 = [nVec.x, nVec.y, nVec.z];
     const meshName = resolveMeshHierarchyName(e.object);
-    const surfaceMaterial = inferSurfaceMaterialFromName(meshName);
+    const surfaceMaterial = classifyHitSurfaceMaterial(meshName, e.point, nVec);
     const hitPt: Vec3 = [e.point.x, e.point.y, e.point.z];
 
     onHoverHit({
@@ -248,10 +157,15 @@ export function HouseMesh({
       surfaceMaterial,
     });
 
-    if (toolMode === 'SURFACE_SCATTER' && isPaintingScatter && (e.object as THREE.Mesh).isMesh) {
+    if (
+      toolMode === 'SURFACE_SCATTER' &&
+      isPaintingScatter &&
+      (e.object as THREE.Mesh).isMesh
+    ) {
       if (
         !lastScatterSampleRef.current ||
-        lastScatterSampleRef.current.distanceTo(e.point) >= activeBrushRadius * 0.35
+        lastScatterSampleRef.current.distanceTo(e.point) >=
+          activeBrushRadius * 0.35
       ) {
         lastScatterSampleRef.current = e.point.clone();
         const tris = extractNearbyMeshTriangles(
@@ -273,9 +187,10 @@ export function HouseMesh({
     if (e.button !== 0) return;
     e.stopPropagation();
 
-    const worldNormal = computeHitWorldNormal(e);
+    const nVec = computeHitWorldNormalVec(e);
+    const worldNormal: Vec3 = [nVec.x, nVec.y, nVec.z];
     const meshName = resolveMeshHierarchyName(e.object);
-    const surfaceMaterial = inferSurfaceMaterialFromName(meshName);
+    const surfaceMaterial = classifyHitSurfaceMaterial(meshName, e.point, nVec);
     const rawPt: Vec3 = [e.point.x, e.point.y, e.point.z];
     const offsetPt = offsetPointAlongNormal(rawPt, worldNormal);
 
@@ -285,12 +200,15 @@ export function HouseMesh({
     }
 
     if (toolMode === 'SELECT') {
-      // Find closest bulb within 0.45 scene units to select its LightRun
       let bestId: string | null = null;
-      let bestDist = 0.45;
+      let bestDist = 0.55;
       for (const run of runs) {
         for (const bp of run.bulbPositions) {
-          const d = Math.hypot(bp[0] - rawPt[0], bp[1] - rawPt[1], bp[2] - rawPt[2]);
+          const d = Math.hypot(
+            bp[0] - rawPt[0],
+            bp[1] - rawPt[1],
+            bp[2] - rawPt[2]
+          );
           if (d < bestDist) {
             bestDist = d;
             bestId = run.id;
@@ -311,7 +229,6 @@ export function HouseMesh({
     }
 
     if (toolMode === 'HELICAL_WRAP') {
-      // Snap X/Z center to column bounding box center if clicking a column/pillar mesh
       let axisPt: Vec3 = [...rawPt];
       if ((e.object as THREE.Mesh).isMesh && surfaceMaterial === 'column_post') {
         const box = new THREE.Box3().setFromObject(e.object);
@@ -362,16 +279,160 @@ export function HouseMesh({
     }
   };
 
+  return {
+    onPointerMove: handlePointerMove,
+    onPointerOut: handlePointerOut,
+    onPointerDown: handlePointerDown,
+    onPointerUp: handlePointerUp,
+    onDoubleClick: handleDoubleClick,
+  };
+}
+
+function disposeGroupResources(group: THREE.Group) {
+  group.traverse((obj) => {
+    if ((obj as THREE.Mesh).isMesh) {
+      const m = obj as THREE.Mesh;
+      m.geometry?.dispose();
+      if (Array.isArray(m.material)) {
+        m.material.forEach((mat) => mat.dispose());
+      } else {
+        m.material?.dispose();
+      }
+    }
+  });
+}
+
+export function HouseMesh({
+  glbUrl,
+  lightingMode,
+  onSceneLoaded,
+  onHoverHit,
+}: HouseMeshProps) {
+  const [loadedGroup, setLoadedGroup] = useState<THREE.Group | null>(null);
+  const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  const handlers = useSurfacePointerHandlers(onHoverHit);
+
+  useEffect(() => {
+    let cancelled = false;
+    let activeRoot: THREE.Group | null = null;
+    const loader = new GLTFLoader();
+
+    loader.load(
+      glbUrl,
+      (gltf) => {
+        if (cancelled) return;
+        const root = gltf.scene;
+        activeRoot = root;
+        const mats: THREE.MeshStandardMaterial[] = [];
+
+        root.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mesh = obj as THREE.Mesh;
+            if (!mesh.geometry.getAttribute('normal')) {
+              mesh.geometry.computeVertexNormals();
+            }
+            const hasVertexColors = Boolean(
+              mesh.geometry.getAttribute('color')
+            );
+            const stdMat = new THREE.MeshStandardMaterial({
+              color: getLightingTint(lightingMode),
+              vertexColors: hasVertexColors,
+              roughness: 0.8,
+              metalness: 0.07,
+            });
+            mesh.material = stdMat;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mats.push(stdMat);
+          }
+        });
+
+        root.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(root);
+        const minY = Number.isFinite(box.min.y) ? box.min.y : 0;
+
+        materialsRef.current = mats;
+        setLoadedGroup(root);
+        onSceneLoaded(root, minY, box);
+      },
+      undefined,
+      (err) => {
+        console.error('Failed to load scene.glb:', err);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      if (activeRoot) {
+        disposeGroupResources(activeRoot);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glbUrl]);
+
+  useEffect(() => {
+    const tint = getLightingTint(lightingMode);
+    for (const mat of materialsRef.current) {
+      mat.color.copy(tint);
+      mat.needsUpdate = true;
+    }
+  }, [lightingMode]);
+
   if (!loadedGroup) return null;
 
-  return (
-    <primitive
-      object={loadedGroup}
-      onPointerMove={handlePointerMove}
-      onPointerOut={handlePointerOut}
-      onPointerDown={handlePointerDown}
-      onPointerUp={handlePointerUp}
-      onDoubleClick={handleDoubleClick}
-    />
+  return <primitive object={loadedGroup} {...handlers} />;
+}
+
+export function ProceduralBuildingMesh({
+  presetOrSpec,
+  lightingMode,
+  onSceneLoaded,
+  onHoverHit,
+}: {
+  presetOrSpec: 'condo' | 'house' | ArchitecturalBuildingSpec;
+  lightingMode: LightingMode;
+  onSceneLoaded: (group: THREE.Group, minY: number, bounds: THREE.Box3) => void;
+  onHoverHit: (info: HoverHitInfo | null) => void;
+}) {
+  const handlers = useSurfacePointerHandlers(onHoverHit);
+  const baseColorsRef = useRef<Map<THREE.MeshStandardMaterial, THREE.Color>>(
+    new Map()
   );
+
+  const built = useMemo(
+    () => buildClientProceduralBuilding(presetOrSpec),
+    [presetOrSpec]
+  );
+
+  useEffect(() => {
+    const map = new Map<THREE.MeshStandardMaterial, THREE.Color>();
+    built.group.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mat = (obj as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        if (mat?.color) {
+          map.set(mat, mat.color.clone());
+        }
+      }
+    });
+    baseColorsRef.current = map;
+
+    const box = new THREE.Box3().setFromObject(built.group);
+    onSceneLoaded(built.group, built.minY, box);
+
+    return () => {
+      disposeGroupResources(built.group);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [built]);
+
+  useEffect(() => {
+    const mult =
+      lightingMode === 'DAY' ? 1.0 : lightingMode === 'DUSK' ? 0.66 : 0.34;
+    baseColorsRef.current.forEach((orig, mat) => {
+      mat.color.copy(orig).multiplyScalar(mult);
+      mat.needsUpdate = true;
+    });
+  }, [lightingMode, built]);
+
+  return <primitive object={built.group} {...handlers} />;
 }
