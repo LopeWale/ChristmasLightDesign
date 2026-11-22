@@ -15,6 +15,7 @@
    - Root `.env` and `apps/web/.env` are both supported server-side.
    - Deterministic mock responses are returned **only** when `GEMINI_MOCK_MODE=true`.
 6. **WebGL Buffer Preservation & Full-Bleed Progressive UX:** `<Canvas gl={{ preserveDrawingBuffer: true, antialias: true }}>` is mandatory, landing state (`sceneSource === 'NONE'`) must remain free of sidebars/empty HUDs, and floating dark obsidian HUD pills must maintain high contrast across `DAY`, `DUSK`, and `NIGHT` physical `<Sky>` modes.
+7. **PR-Only Git Workflow:** Never push commits directly to `main`. All repository changes must be committed on a dedicated feature/fix/chore branch, pushed to `origin`, and submitted via a GitHub Pull Request targeting `main`.
 
 ## Ports & Services
 | Service | Path | Port | URL |
