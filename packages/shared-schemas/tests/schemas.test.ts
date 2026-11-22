@@ -18,6 +18,8 @@ import {
   CalibrationSourceSchema,
   SceneSourceModeSchema,
   ReconstructionModeSchema,
+  ScanAngleSectorSchema,
+  LiveScanSessionSchema,
 } from '../src/index';
 
 describe('shared-schemas core contracts', () => {
@@ -399,5 +401,44 @@ describe('shared-schemas core contracts', () => {
     expect(SceneSourceModeSchema.parse('MAPS_3D_TILES')).toBe('MAPS_3D_TILES');
     expect(ReconstructionModeSchema.parse('da3')).toBe('da3');
     expect(mapsCtx.groundElevationMeters).toBeNull();
+  });
+
+  it('validates LiveScanSession and ScanAngleSector contracts for real-time phone QR scanning', () => {
+    expect(ScanAngleSectorSchema.parse('front_left')).toBe('front_left');
+    expect(() => ScanAngleSectorSchema.parse('top_drone')).toThrow();
+
+    const session = LiveScanSessionSchema.parse({
+      sessionId: 'scan-a1b2c3d4e5',
+      status: 'ready',
+      address: '1007 N Shartel Ave, Oklahoma City, OK',
+      targetHeightMeters: 9.3,
+      coveredSectors: ['front', 'right_side'],
+      frames: [
+        {
+          frameId: 'f-001',
+          sector: 'front',
+          sharpnessScore: 184.5,
+          yawDegrees: 0,
+          capturedAtIso: '2026-11-22T17:00:00Z',
+        },
+      ],
+      latestJob: {
+        jobId: 'scan-a1b2c3d4e5',
+        status: 'completed',
+        progress: 100,
+        mode: 'da3',
+        backendUsed: 'da3',
+        glbUrl: '/api/reconstruct?jobId=scan-a1b2c3d4e5&artifact=scene_r002.glb',
+        splatUrl: '/api/reconstruct?jobId=scan-a1b2c3d4e5&artifact=scene_r002.splat',
+      },
+      neuralBackendUsed: 'da3_moge2_mps',
+      guidanceMessage: 'Captured Front & Right Side — walk left to scan Left Side',
+      updatedAtIso: '2026-11-22T17:00:02Z',
+      error: null,
+    });
+
+    expect(session.coveredSectors).toEqual(['front', 'right_side']);
+    expect(session.neuralBackendUsed).toBe('da3_moge2_mps');
+    expect(session.latestJob?.glbUrl).toContain('scene_r002.glb');
   });
 });

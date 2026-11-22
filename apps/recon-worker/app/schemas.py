@@ -80,3 +80,46 @@ class ReconstructionJob(BaseModel):
     meshStats: Optional[SceneMetadata] = None
     buildingSpec: Optional[ArchitecturalBuildingSpecModel] = None
     error: Optional[str] = None
+
+
+ScanAngleSector = Literal[
+    "front",
+    "front_left",
+    "left_side",
+    "front_right",
+    "right_side",
+    "rear",
+]
+
+NeuralBackendKind = Literal[
+    "da3_moge2_mps",
+    "moge2_mps",
+    "da3_mps",
+    "hybrid_multiview_relief",
+]
+
+
+class LiveScanFrameMetaModel(BaseModel):
+    frameId: str
+    sector: ScanAngleSector
+    sharpnessScore: float = Field(ge=0.0)
+    yawDegrees: Optional[float] = None
+    capturedAtIso: str
+
+
+class LiveScanSessionModel(BaseModel):
+    sessionId: str
+    status: Literal["waiting_for_frames", "reconstructing", "ready", "failed"] = (
+        "waiting_for_frames"
+    )
+    address: Optional[str] = None
+    targetHeightMeters: Optional[float] = None
+    coveredSectors: list[ScanAngleSector] = Field(default_factory=list)
+    frames: list[LiveScanFrameMetaModel] = Field(default_factory=list)
+    latestJob: Optional[ReconstructionJob] = None
+    neuralBackendUsed: NeuralBackendKind = "hybrid_multiview_relief"
+    guidanceMessage: str = (
+        "Point camera at the front of your building to capture the anchor frame."
+    )
+    updatedAtIso: str
+    error: Optional[str] = None

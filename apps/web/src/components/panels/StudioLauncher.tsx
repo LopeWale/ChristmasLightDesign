@@ -11,6 +11,8 @@ import {
   Loader2,
   Layers,
   Cpu,
+  QrCode,
+  Camera,
   X,
 } from 'lucide-react';
 
@@ -19,6 +21,7 @@ export interface StudioLauncherProps {
   onChangeAddress: (value: string) => void;
   onSubmitAddress: (address: string) => Promise<void>;
   onUploadFiles: (files: FileList, reconMode: 'auto' | 'da3') => Promise<void>;
+  onStartLiveScan?: () => Promise<void>;
   onLoadSample: (preset: 'condo' | 'house') => Promise<void>;
   isBusy: boolean;
   progressPercent?: number | null;
@@ -33,6 +36,7 @@ export function StudioLauncher({
   onChangeAddress,
   onSubmitAddress,
   onUploadFiles,
+  onStartLiveScan,
   onLoadSample,
   isBusy,
   progressPercent = null,
@@ -270,6 +274,37 @@ export function StudioLauncher({
             Browse
           </span>
         </button>
+
+        {onStartLiveScan && (
+          <button
+            type="button"
+            data-testid="btn-start-live-scan"
+            disabled={isBusy}
+            onClick={() => void onStartLiveScan()}
+            className="mt-2.5 flex w-full items-center justify-between rounded-2xl border border-emerald-400/30 bg-emerald-500/[0.08] px-4 py-3 text-left transition hover:border-emerald-400/55 hover:bg-emerald-500/[0.14] disabled:opacity-50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/15 text-emerald-300 ring-1 ring-emerald-400/35">
+                <Camera className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-100">
+                  Live Walkaround Camera Scan (Phone QR)
+                  <span className="rounded-full bg-emerald-400/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-300">
+                    Real-Time 3DGS
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Scan QR with your phone &amp; watch multi-wall 3D mesh + SparkJS splats build live
+                </div>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-400/35 bg-emerald-400/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+              <QrCode className="h-3.5 w-3.5" />
+              Pair Phone
+            </span>
+          </button>
+        )}
 
         <input
           ref={fileInputRef}

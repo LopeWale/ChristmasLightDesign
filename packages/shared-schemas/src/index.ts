@@ -495,3 +495,68 @@ export const ProjectExportSchema = z.object({
   runs: z.array(LightRunSchema),
 });
 export type ProjectExport = z.infer<typeof ProjectExportSchema>;
+
+// ---------------------------------------------------------------------------
+// 9. Live Guided Multi-View Camera Scan & Phone QR Sync Contracts
+// ---------------------------------------------------------------------------
+
+export const ScanAngleSectorSchema = z.enum([
+  'front',
+  'front_left',
+  'left_side',
+  'front_right',
+  'right_side',
+  'rear',
+]);
+export type ScanAngleSector = z.infer<typeof ScanAngleSectorSchema>;
+
+export const NeuralBackendKindSchema = z.enum([
+  'da3_moge2_mps',
+  'moge2_mps',
+  'da3_mps',
+  'hybrid_multiview_relief',
+]);
+export type NeuralBackendKind = z.infer<typeof NeuralBackendKindSchema>;
+
+export const LiveScanFrameMetaSchema = z.object({
+  frameId: z.string().min(1),
+  sector: ScanAngleSectorSchema,
+  sharpnessScore: z.number().nonnegative(),
+  yawDegrees: z
+    .number()
+    .finite()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  capturedAtIso: z.string().min(1),
+});
+export type LiveScanFrameMeta = z.infer<typeof LiveScanFrameMetaSchema>;
+
+export const LiveScanSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  status: z.enum([
+    'waiting_for_frames',
+    'reconstructing',
+    'ready',
+    'failed',
+  ]),
+  address: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  targetHeightMeters: z
+    .number()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
+  coveredSectors: z.array(ScanAngleSectorSchema),
+  frames: z.array(LiveScanFrameMetaSchema),
+  latestJob: ReconstructionJobSchema.nullish().transform((v) => v ?? undefined),
+  neuralBackendUsed: NeuralBackendKindSchema,
+  guidanceMessage: z.string(),
+  updatedAtIso: z.string().min(1),
+  error: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? undefined),
+});
+export type LiveScanSession = z.infer<typeof LiveScanSessionSchema>;

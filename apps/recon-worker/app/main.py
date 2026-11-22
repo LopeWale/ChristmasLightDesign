@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import logging
@@ -12,9 +13,10 @@ from typing import Any
 import uuid
 
 import cv2
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 # Prevent OpenCV pthreads/GCD thread-pool contention inside ThreadPoolExecutor workers on macOS
 cv2.setNumThreads(1)
@@ -23,10 +25,22 @@ cv2.setNumThreads(1)
 # race on lazy C-extension imports (scipy.signal / numpy.fft / trimesh)
 from app.architectural_backend import ArchitecturalReconstructor, PRESET_CONDO_3F_2B  # noqa: E402,F401
 from app.da3_mps_backend import DA3MpsReconstructor  # noqa: E402,F401
+from app.live_scan_manager import LiveScanSessionManager  # noqa: E402
+from app.neural_metric_engine import NEURAL_RUNTIME  # noqa: E402
 from app.reconstructor import select_reconstructor  # noqa: E402
-from app.schemas import ArchitecturalBuildingSpecModel, ReconstructionJob  # noqa: E402
+from app.schemas import (  # noqa: E402
+    ArchitecturalBuildingSpecModel,
+    LiveScanSessionModel,
+    ReconstructionJob,
+)
 from app.synthetic_backend import SyntheticReconstructor  # noqa: E402,F401
 from app.video_keyframes import extract_sharp_keyframes  # noqa: E402
+
+
+class CreateLiveScanSessionRequest(BaseModel):
+    address: str | None = None
+    targetHeightMeters: float | None = None
+    partialOverrides: dict[str, Any] | None = None
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -91,6 +105,7 @@ def create_app() -> FastAPI:
     jobs_lock = threading.Lock()
     jobs_store: dict[str, ReconstructionJob] = {}
     executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="recon-worker")
+    scan_manager = LiveScanSessionManager(_default_jobs_root)
 
     def _save_job(job_dir: Path, job: ReconstructionJob) -> None:
         with jobs_lock:
@@ -215,9 +230,75 @@ def create_app() -> FastAPI:
                 raise
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    def health() -> dict[str, Any]:
         default_mode = os.environ.get("RECON_BACKEND", "auto")
-        return {"status": "ok", "defaultMode": default_mode}
+        return {
+            "status": "ok",
+            "defaultMode": default_mode,
+            **NEURAL_RUNTIME.status(),
+        }
+
+    @app.post("/models/warmup")
+    def warmup_neural_models(allow_download: bool = Query(default=False)) -> dict[str, Any]:
+        NEURAL_RUNTIME.start_background_warmup(allow_download=allow_download)
+        return {"status": "warming", **NEURAL_RUNTIME.status()}
+
+    @app.post("/scan/sessions", response_model=LiveScanSessionModel)
+    def create_scan_session(
+        payload: CreateLiveScanSessionRequest | None = Body(default=None),
+    ) -> LiveScanSessionModel:
+        req = payload or CreateLiveScanSessionRequest()
+        return scan_manager.create_session(
+            address=req.address,
+            target_height_m=req.targetHeightMeters,
+            partial_overrides=req.partialOverrides,
+        )
+
+    @app.get("/scan/sessions/{session_id}", response_model=LiveScanSessionModel)
+    def get_scan_session(session_id: str) -> LiveScanSessionModel:
+        if not SAFE_JOB_ID_RE.match(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session identifier")
+        session = scan_manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(
+                status_code=404, detail=f"Scan session '{session_id}' not found"
+            )
+        return session
+
+    @app.post("/scan/sessions/{session_id}/frames", response_model=LiveScanSessionModel)
+    async def ingest_scan_frame(
+        session_id: str,
+        file: UploadFile = File(...),
+        sector: str = Form(default="auto"),
+        yaw_deg: str = Form(default=""),
+    ) -> LiveScanSessionModel:
+        if not SAFE_JOB_ID_RE.match(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session identifier")
+        raw_bytes = await file.read()
+        if not raw_bytes:
+            raise HTTPException(status_code=400, detail="Empty camera frame payload")
+
+        parsed_yaw: float | None = None
+        if yaw_deg and yaw_deg.strip():
+            try:
+                val = float(yaw_deg.strip())
+                if val == val:  # guard NaN
+                    parsed_yaw = val
+            except ValueError:
+                parsed_yaw = None
+
+        try:
+            return await asyncio.to_thread(
+                scan_manager.ingest_frame,
+                session_id,
+                raw_bytes,
+                sector,
+                parsed_yaw,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/jobs/demo", response_model=ReconstructionJob)
     def start_demo_job(preset: str = Query(default="house")) -> ReconstructionJob:
@@ -344,6 +425,10 @@ def create_app() -> FastAPI:
                 with jobs_lock:
                     jobs_store[job_id] = persisted
                 return persisted
+            if job_id.startswith("scan-"):
+                scan_session = scan_manager.get_session(job_id)
+                if scan_session is not None and scan_session.latestJob is not None:
+                    return scan_session.latestJob
             raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
         return job
 

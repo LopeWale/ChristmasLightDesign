@@ -299,20 +299,33 @@ export function HouseMesh({
   onHoverHit,
 }: HouseMeshProps) {
   const [loadedGroup, setLoadedGroup] = useState<THREE.Group | null>(null);
+  const activeGroupRef = useRef<THREE.Group | null>(null);
   const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
+  const lightingModeRef = useRef<LightingMode>(lightingMode);
+  lightingModeRef.current = lightingMode;
   const handlers = useSurfacePointerHandlers(onHoverHit);
 
   useEffect(() => {
+    return () => {
+      if (activeGroupRef.current) {
+        disposeGroupResources(activeGroupRef.current);
+        activeGroupRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
-    let activeRoot: THREE.Group | null = null;
     const loader = new GLTFLoader();
 
     loader.load(
       glbUrl,
       (gltf) => {
-        if (cancelled) return;
+        if (cancelled && activeGroupRef.current !== null) {
+          disposeGroupResources(gltf.scene);
+          return;
+        }
         const root = gltf.scene;
-        activeRoot = root;
         const mats: THREE.MeshStandardMaterial[] = [];
 
         root.traverse((obj) => {
@@ -327,7 +340,7 @@ export function HouseMesh({
             const stdMat = createTintedGlbMaterial(
               mesh.material,
               hasVertexColors,
-              lightingMode
+              lightingModeRef.current
             );
             mesh.material = stdMat;
             mesh.castShadow = true;
@@ -340,9 +353,16 @@ export function HouseMesh({
         const box = new THREE.Box3().setFromObject(root);
         const minY = Number.isFinite(box.min.y) ? box.min.y : 0;
 
+        const prevGroup = activeGroupRef.current;
+        activeGroupRef.current = root;
         materialsRef.current = mats;
         setLoadedGroup(root);
         onSceneLoaded(root, minY, box);
+
+        if (prevGroup && prevGroup !== root) {
+          // Defer old GPU buffer disposal until React has committed the new group
+          setTimeout(() => disposeGroupResources(prevGroup), 80);
+        }
       },
       undefined,
       (err) => {
@@ -352,17 +372,18 @@ export function HouseMesh({
 
     return () => {
       cancelled = true;
-      if (activeRoot) {
-        disposeGroupResources(activeRoot);
-      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [glbUrl]);
 
   useEffect(() => {
-    const tint = getLightingTint(lightingMode);
     for (const mat of materialsRef.current) {
-      mat.color.copy(tint);
+      const hasTex = Boolean(mat.map);
+      mat.color.copy(getLightingTint(lightingMode, hasTex));
+      if (hasTex) {
+        mat.emissiveIntensity =
+          lightingMode === 'NIGHT' ? 0.18 : lightingMode === 'DUSK' ? 0.06 : 0.0;
+      }
       mat.needsUpdate = true;
     }
   }, [lightingMode]);
