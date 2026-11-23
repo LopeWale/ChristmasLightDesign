@@ -15,7 +15,10 @@
     "test:e2e": "npm run test:e2e --workspace=@lumen3d/web",
     "dev:worker": "bash scripts/dev-worker.sh",
     "dev:web": "npm run dev --workspace=@lumen3d/web",
-    "dev": "concurrently -n worker,web -c cyan,magenta \"npm run dev:worker\" \"npm run dev:web\""
+    "dev:web:https": "npm run dev:https --workspace=@lumen3d/web",
+    "dev": "concurrently -n worker,web -c cyan,magenta \"npm run dev:worker\" \"npm run dev:web\"",
+    "dev:https": "concurrently -n worker,web -c cyan,magenta \"npm run dev:worker\" \"npm run dev:web:https\"",
+    "install:neural": "bash scripts/install-neural-models.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

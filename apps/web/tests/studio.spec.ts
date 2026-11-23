@@ -246,3 +246,84 @@ test('E2E 4: Photo Upload Reconstruction (Architectural 3D & Neural Depth + Spla
   });
   await expect(page.getByTestId('floating-dock')).toBeVisible();
 });
+
+test('E2E 5: Live Walkaround Camera Scan (Phone QR Pairing -> Mobile Multi-Angle Capture -> Live Desktop 3D + SparkJS Sync)', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+
+  // Capture a high-contrast sharp PNG before opening QR scan modal
+  const crispFramePng = await page
+    .getByTestId('studio-launcher')
+    .screenshot({ type: 'png' });
+
+  // 1. Start Live Walkaround Camera Scan on Desktop
+  await page.getByTestId('btn-start-live-scan').click();
+  await expect(page.getByTestId('live-scan-modal')).toBeVisible();
+  const qrSrc = await page
+    .getByTestId('live-scan-qr-image')
+    .getAttribute('src');
+  expect(qrSrc).toMatch(/^data:image\/png;base64,/);
+
+  const scanHref = await page
+    .getByTestId('link-open-desktop-webcam-scanner')
+    .getAttribute('href');
+  expect(scanHref).toMatch(/^\/scan\/scan-/);
+
+  // 2. Open paired Mobile Scanner in a second browser context tab
+  const mobilePage = await context.newPage();
+  await mobilePage.goto(scanHref!);
+  await expect(mobilePage.getByTestId('mobile-live-scanner')).toBeVisible();
+  await expect(mobilePage.getByTestId('sector-pill-front')).toBeVisible();
+
+  // 3. Snap Front Elevation on mobile -> Desktop automatically transitions into 3D Studio (scene_r001)
+  await mobilePage.getByTestId('sector-pill-front').click();
+  await mobilePage.getByTestId('input-mobile-camera-file').setInputFiles({
+    name: 'mobile_front.png',
+    mimeType: 'image/png',
+    buffer: crispFramePng,
+  });
+
+  await expect(page.getByTestId('live-scan-hud-pill')).toContainText(
+    '1/5 angles',
+    { timeout: 15_000 }
+  );
+  await expect(page.getByTestId('floating-dock')).toBeVisible();
+
+  const rev1Glb = await page.evaluate(() => {
+    const store = (window as unknown as { __LUMEN3D_STORE__?: { getState: () => { job?: { glbUrl?: string } } } })
+      .__LUMEN3D_STORE__;
+    return store?.getState().job?.glbUrl ?? '';
+  });
+  expect(rev1Glb).toContain('scene_r001.glb');
+
+  // 4. Walk to Right Wall on mobile & snap frame #2 -> Desktop live-updates to 2/5 angles & scene_r002.glb/.splat
+  await mobilePage.getByTestId('sector-pill-right_side').click();
+  await mobilePage.getByTestId('input-mobile-camera-file').setInputFiles({
+    name: 'mobile_right.png',
+    mimeType: 'image/png',
+    buffer: crispFramePng,
+  });
+
+  await expect(page.getByTestId('live-scan-hud-pill')).toContainText(
+    '2/5 angles',
+    { timeout: 15_000 }
+  );
+
+  const rev2Urls = await page.evaluate(() => {
+    const store = (window as unknown as {
+      __LUMEN3D_STORE__?: {
+        getState: () => { job?: { glbUrl?: string; splatUrl?: string } };
+      };
+    }).__LUMEN3D_STORE__;
+    return store?.getState().job ?? {};
+  });
+  expect(rev2Urls.glbUrl).toContain('scene_r002.glb');
+  expect(rev2Urls.splatUrl).toContain('scene_r002.splat');
+
+  // Finish scan cleanly
+  await page.getByTestId('btn-finish-live-scan').click();
+  await expect(page.getByTestId('live-scan-hud-pill')).toHaveCount(0);
+  await mobilePage.close();
+});

@@ -6,15 +6,18 @@ import type {
 } from '@lumen3d/shared-schemas';
 import type { LightingMode } from '@/store/useStudioStore';
 
-export function getLightingTint(mode: LightingMode): THREE.Color {
+export function getLightingTint(
+  mode: LightingMode,
+  hasPhotoTexture = false
+): THREE.Color {
   switch (mode) {
     case 'DAY':
       return new THREE.Color('#ffffff');
     case 'DUSK':
-      return new THREE.Color('#a6a8ce');
+      return new THREE.Color(hasPhotoTexture ? '#c4c6e4' : '#a6a8ce');
     case 'NIGHT':
     default:
-      return new THREE.Color('#647ca8');
+      return new THREE.Color(hasPhotoTexture ? '#9eb6de' : '#647ca8');
   }
 }
 
@@ -33,8 +36,16 @@ export function createTintedGlbMaterial(
   }
 
   return new THREE.MeshStandardMaterial({
-    color: getLightingTint(lightingMode),
+    color: getLightingTint(lightingMode, Boolean(origMap)),
     map: origMap,
+    emissive: origMap ? new THREE.Color('#dbeafe') : new THREE.Color('#000000'),
+    emissiveMap: origMap,
+    emissiveIntensity:
+      origMap && lightingMode === 'NIGHT'
+        ? 0.18
+        : origMap && lightingMode === 'DUSK'
+          ? 0.06
+          : 0.0,
     normalMap: stdOrig?.normalMap ?? null,
     roughnessMap: stdOrig?.roughnessMap ?? null,
     metalnessMap: stdOrig?.metalnessMap ?? null,

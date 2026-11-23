@@ -100,6 +100,33 @@ def _make_textured_quad_box(
     )
 
 
+def _make_single_textured_wall_quad(
+    corners_ccw: list[tuple[float, float, float]],
+    normal_xyz: tuple[float, float, float],
+    pil_tex: Image.Image,
+    mat_name: str,
+) -> trimesh.Trimesh:
+    verts = np.asarray(corners_ccw, dtype=np.float64)
+    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    normals = np.tile(np.asarray(normal_xyz, dtype=np.float64), (4, 1))
+    uv = np.array(
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=np.float32
+    )
+    mat = PBRMaterial(
+        name=mat_name,
+        baseColorTexture=pil_tex,
+        metallicFactor=0.07,
+        roughnessFactor=0.77,
+    )
+    return trimesh.Trimesh(
+        vertices=verts,
+        faces=faces,
+        vertex_normals=normals,
+        visual=TextureVisuals(uv=uv, material=mat),
+        process=False,
+    )
+
+
 def _make_side_and_rear_shell(
     min_xyz: tuple[float, float, float],
     max_xyz: tuple[float, float, float],
@@ -165,6 +192,33 @@ def _make_side_and_rear_shell(
         baseColorTexture=pil_tex,
         metallicFactor=0.07,
         roughnessFactor=0.78,
+    )
+    return trimesh.Trimesh(
+        vertices=verts,
+        faces=faces,
+        vertex_normals=normals,
+        visual=TextureVisuals(uv=uv, material=mat),
+        process=False,
+    )
+
+
+def _make_single_textured_wall_quad(
+    corners_ccw: list[tuple[float, float, float]],
+    normal_xyz: tuple[float, float, float],
+    pil_tex: Image.Image,
+    mat_name: str,
+) -> trimesh.Trimesh:
+    verts = np.asarray(corners_ccw, dtype=np.float64)
+    faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    normals = np.tile(np.asarray(normal_xyz, dtype=np.float64), (4, 1))
+    uv = np.array(
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], dtype=np.float32
+    )
+    mat = PBRMaterial(
+        name=mat_name,
+        baseColorTexture=pil_tex,
+        metallicFactor=0.07,
+        roughnessFactor=0.77,
     )
     return trimesh.Trimesh(
         vertices=verts,
@@ -602,10 +656,12 @@ def _build_relief_facade_mesh(
 def build_photo_textured_architectural_scene(
     image_paths: list[Path],
     spec: ArchitecturalBuildingSpecModel,
+    sector_views: dict[str, Path] | None = None,
+    target_height_m: float | None = None,
 ) -> tuple[trimesh.Scene, ArchitecturalBuildingSpecModel]:
     """
     Reconstruct a high-fidelity, UV-photo-textured, 2.5D depth-relieved, 360-degree metric `.glb`
-    building scene directly from the user's exterior photo(s) + structural spec.
+    building scene directly from the user's exterior photo(s) + multi-angle scan sectors + spec.
     """
     from app.architectural_backend import (
         BALCONY_GUARDRAIL_HEIGHT_M,
@@ -613,7 +669,14 @@ def build_photo_textured_architectural_scene(
         build_architectural_scene,
     )
 
-    views = _select_sharpest_bgr_views(image_paths)
+    front_candidates = (
+        [sector_views["front"]]
+        if sector_views and "front" in sector_views
+        else image_paths
+    )
+    views = _select_sharpest_bgr_views(front_candidates)
+    if not views:
+        views = _select_sharpest_bgr_views(image_paths)
     if not views:
         return build_architectural_scene(spec), spec
 
@@ -625,8 +688,33 @@ def build_photo_textured_architectural_scene(
     right_wing_ratio: float = float(seg["right_wing_height_ratio"])  # type: ignore[arg-type]
     ground_strip: np.ndarray = seg["ground_strip"]  # type: ignore[assignment]
 
-    bldg_h = float(spec.floors) * float(spec.metersPerFloor)
+    eff_mpf = float(spec.metersPerFloor)
+    if target_height_m is not None and 3.0 <= target_height_m <= 36.0:
+        eff_mpf = float(np.clip(target_height_m / max(1, spec.floors), 2.45, 4.8))
+
+    bldg_h = float(spec.floors) * eff_mpf
     photo_width_m = float(np.clip(bldg_h / max(0.38, true_aspect_hw), 5.6, 18.0))
+
+    # Resolve optional dedicated side/rear sector images from live walkaround scan
+    left_seg: dict[str, object] | None = None
+    right_seg: dict[str, object] | None = None
+    rear_seg: dict[str, object] | None = None
+    if sector_views:
+        left_p = sector_views.get("left_side") or sector_views.get("front_left")
+        right_p = sector_views.get("right_side") or sector_views.get("front_right")
+        rear_p = sector_views.get("rear")
+        if left_p is not None:
+            l_views = _select_sharpest_bgr_views([left_p])
+            if l_views:
+                left_seg = _segment_facade_and_masses(l_views[0])
+        if right_p is not None:
+            r_views = _select_sharpest_bgr_views([right_p])
+            if r_views:
+                right_seg = _segment_facade_and_masses(r_views[0])
+        if rear_p is not None:
+            b_views = _select_sharpest_bgr_views([rear_p])
+            if b_views:
+                rear_seg = _segment_facade_and_masses(b_views[0])
 
     # Measure spec footprint width; if Maps supplied a multi-unit rowhouse block (> 1.35x single-unit photo width),
     # constrain width to the actual single-unit facade shown in the user's photo!
@@ -638,13 +726,22 @@ def build_photo_textured_architectural_scene(
         eff_w = photo_width_m
     else:
         eff_w = 0.65 * photo_width_m + 0.35 * spec_w
-    eff_d = float(np.clip(spec_d if 5.5 <= spec_d <= 15.0 else eff_w * 0.88, 5.8, 14.0))
+
+    # If a side walkaround view was captured, measure actual metric building depth from side elevation aspect ratio!
+    side_seg_for_depth = right_seg or left_seg
+    if side_seg_for_depth is not None:
+        side_aspect = float(side_seg_for_depth["true_aspect_hw"])  # type: ignore[arg-type]
+        measured_d = float(np.clip(bldg_h / max(0.38, side_aspect), 5.6, 16.0))
+        eff_d = measured_d
+    else:
+        eff_d = float(np.clip(spec_d if 5.5 <= spec_d <= 15.0 else eff_w * 0.88, 5.8, 14.0))
 
     hx = round(eff_w * 0.5, 3)
     hz = round(eff_d * 0.5, 3)
 
     updated_spec = spec.model_copy(
         update={
+            "metersPerFloor": round(eff_mpf, 3),
             "footprintPolygonMeters": [(-hx, -hz), (hx, -hz), (hx, hz), (-hx, hz)],
             "hasGarage": bool(spec.hasGarage or right_wing_crop is not None),
         }
@@ -669,17 +766,53 @@ def build_photo_textured_architectural_scene(
     )
     scene.add_geometry(ground_mesh, node_name="ground_turf", geom_name="ground_turf")
 
-    # 2. 360-Degree Side & Rear Cladding Envelope (open +Z front so front_facade_walls has zero poke-through!)
-    secondary_view = views[1] if len(views) >= 2 else None
-    side_tex = _synthesize_side_cladding_texture(rectified_bgr, secondary_view)
-    body_box = _make_side_and_rear_shell(
-        (-hx, 0.02, -hz),
-        (hx, bldg_h, hz),
-        side_tex,
-        "side_rear_cladding_pbr",
+    # 2. 360-Degree Side & Rear Cladding Envelope (upgraded per-wall with live walkaround photos when available!)
+    default_side_tex = _synthesize_side_cladding_texture(rectified_bgr, None)
+    left_tex = (
+        Image.fromarray(cv2.cvtColor(left_seg["rectified_bgr"], cv2.COLOR_BGR2RGB))  # type: ignore[arg-type]
+        if left_seg is not None
+        else default_side_tex
+    )
+    right_tex = (
+        Image.fromarray(cv2.cvtColor(right_seg["rectified_bgr"], cv2.COLOR_BGR2RGB))  # type: ignore[arg-type]
+        if right_seg is not None
+        else default_side_tex
+    )
+    rear_tex = (
+        Image.fromarray(cv2.cvtColor(rear_seg["rectified_bgr"], cv2.COLOR_BGR2RGB))  # type: ignore[arg-type]
+        if rear_seg is not None
+        else default_side_tex
+    )
+
+    scene.add_geometry(
+        _make_single_textured_wall_quad(
+            [(-hx, 0.02, -hz), (-hx, 0.02, hz), (-hx, bldg_h, hz), (-hx, bldg_h, -hz)],
+            (-1.0, 0.0, 0.0),
+            left_tex,
+            "left_facade_pbr",
+        ),
+        node_name="left_facade_wall",
+        geom_name="left_facade_wall",
     )
     scene.add_geometry(
-        body_box, node_name="side_and_rear_walls", geom_name="side_and_rear_walls"
+        _make_single_textured_wall_quad(
+            [(hx, 0.02, hz), (hx, 0.02, -hz), (hx, bldg_h, -hz), (hx, bldg_h, hz)],
+            (1.0, 0.0, 0.0),
+            right_tex,
+            "right_facade_pbr",
+        ),
+        node_name="right_facade_wall",
+        geom_name="right_facade_wall",
+    )
+    scene.add_geometry(
+        _make_single_textured_wall_quad(
+            [(hx, 0.02, -hz), (-hx, 0.02, -hz), (-hx, bldg_h, -hz), (hx, bldg_h, -hz)],
+            (0.0, 0.0, -1.0),
+            rear_tex,
+            "rear_facade_pbr",
+        ),
+        node_name="rear_facade_wall",
+        geom_name="rear_facade_wall",
     )
 
     # 3. High-Res Perspective-Rectified + 2.5D Depth-Relieved Front Facade Mesh

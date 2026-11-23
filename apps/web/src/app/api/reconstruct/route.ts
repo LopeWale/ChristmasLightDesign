@@ -17,10 +17,13 @@ import {
   fetchGoogleMapsBuildingContext,
   mapsContextToPartialOverrides,
 } from '@/lib/maps/buildingContext';
+import {
+  getWorkerBaseUrl,
+  NO_STORE_HEADERS,
+  rewriteJobArtifactUrls as rewriteJobUrls,
+} from '@/lib/scan/scanProxy';
 
 export const dynamic = 'force-dynamic';
-
-const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
@@ -35,27 +38,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
         resolve(fallback);
       });
   });
-}
-
-function getWorkerBaseUrl(): string {
-  return (process.env.RECON_WORKER_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
-}
-
-function rewriteJobUrls(job: ReconstructionJob): ReconstructionJob {
-  const id = encodeURIComponent(job.jobId);
-  return {
-    ...job,
-    glbUrl: job.glbUrl ? `/api/reconstruct?jobId=${id}&artifact=scene.glb` : undefined,
-    splatUrl: job.splatUrl
-      ? `/api/reconstruct?jobId=${id}&artifact=scene.splat`
-      : undefined,
-    camerasUrl: job.camerasUrl
-      ? `/api/reconstruct?jobId=${id}&artifact=cameras.json`
-      : undefined,
-    referenceImageUrl: job.referenceImageUrl
-      ? `/api/reconstruct?jobId=${id}&artifact=reference_front.png`
-      : undefined,
-  };
 }
 
 const GEMINI_ARCHITECTURAL_SPEC_SCHEMA: Schema = {

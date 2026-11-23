@@ -4,7 +4,7 @@
 **Lumen3D** is a monorepo web studio for 3D exterior multi-view & address-guided reconstruction (supporting multi-story condos with balconies as well as pitched-roof homes), metric spatial scale calibration, multi-orientation holiday light design with night-bloom rendering, deterministic NEC electrical & walk-out balcony ladder math, and Gemini-powered design critique & HOA-safe Bill of Materials (BOM) generation.
 
 ## Hard Architectural Invariants (Non-Negotiable)
-1. **Photorealistic 3D Tiles, Apple Silicon Splat/Depth & Multi-View Reconstruction:** Never use toy single-object 3D mesh generators (`TripoSR`, `TRELLIS`, `Zero123`, `Shap-E`). Address lookups stream live **Google Photorealistic 3D Tiles** via `NASA-AMMOS/3DTilesRendererJS` (`3d-tiles-renderer/r3f` + server-side `/api/maps/tiles/[...path]` proxy), while uploaded walkaround photos/videos use `apps/recon-worker` (`DA3MpsReconstructor` emitting `.glb` + `.splat` for `@react-three/drei` `<Splat>`, `ArchitecturalReconstructor`, `VGGTReconstructor` on CUDA, or client-side `proceduralBuilding.ts` fallback when offline).
+1. **Photorealistic 3D Tiles, Live Walkaround Camera Scan & Multi-View Reconstruction:** Never use toy single-object 3D mesh generators (`TripoSR`, `TRELLIS`, `Zero123`, `Shap-E`). Address lookups stream live **Google Photorealistic 3D Tiles** via `NASA-AMMOS/3DTilesRendererJS` (`3d-tiles-renderer/r3f` + server-side `/api/maps/tiles/[...path]` proxy), while uploaded walkaround photos/videos and real-time Phone QR live camera scans (`/scan/[sessionId]`) use `apps/recon-worker` (`MoGe-2` + `DA3-SMALL` neural metric runtime, `DA3MpsReconstructor`, `ArchitecturalReconstructor` with multi-wall PBR UV projection, `VGGTReconstructor` on CUDA, or client-side `proceduralBuilding.ts` fallback) rendered with World Labs **`@sparkjsdev/spark`** (`SparkRenderer` + `SplatMesh`) over deterministic `.glb` colliders.
 2. **Multi-Mode Reconstruction (`RECON_BACKEND=auto|da3|architectural|vggt|synthetic`) & Auto-Venv Startup:** `scripts/dev-worker.sh` auto-detects or bootstraps `apps/recon-worker/.venv` so `npm run dev` works on any fresh clone or active `.venv`.
 3. **Decimated `.glb` Mesh with Outward Vertex Normals:** Every worker reconstruction job emits `scene.glb` (`<= 250k` faces, valid unit-length outward vertex normals, zero `NaN` vertices, `minY = 0.0`), optional `scene.splat`, `cameras.json`, and `reference_front.png`.
 4. **Deterministic Math First, LLM Second:** Spline arc-lengths (feet), bulb counts, wattage, NEC 15A/80% (`1,440W`) circuit loads, `210W` / `200 ft` series run limits, walk-out balcony ladder sizing (`0 ft` for `balcony_railing`, `6 ft` step-stool for `balcony_soffit`), and `4:1 + 3ft` exterior extension ladder sizing are computed purely in TypeScript (`bomMath.ts`) before passing `DesignTelemetry` JSON to Gemini.
@@ -15,7 +15,7 @@
    - Root `.env` and `apps/web/.env` are both supported server-side.
    - Deterministic mock responses are returned **only** when `GEMINI_MOCK_MODE=true`.
 6. **WebGL Buffer Preservation & Full-Bleed Progressive UX:** `<Canvas gl={{ preserveDrawingBuffer: true, antialias: true }}>` is mandatory, landing state (`sceneSource === 'NONE'`) must remain free of sidebars/empty HUDs, and floating dark obsidian HUD pills must maintain high contrast across `DAY`, `DUSK`, and `NIGHT` physical `<Sky>` modes.
-7. **PR-Only Git Workflow:** Never push commits directly to `main`. All repository changes must be committed on a dedicated feature/fix/chore branch, pushed to `origin`, and submitted via a GitHub Pull Request targeting `main`.
+7. **PR-Only Git Workflow (Mandatory):** Never commit or push directly to `main`. All changes must be developed on a descriptive feature/fix/chore branch, verified with tests, pushed to `origin/<branch>`, and submitted via a GitHub Pull Request (`gh pr create --base main`).
 
 ## Ports & Services
 | Service | Path | Port | URL |
@@ -52,8 +52,12 @@ apps/recon-worker/.venv/bin/pytest apps/recon-worker/tests
 # Run Playwright E2E suite
 npm run test:e2e
 
-# Start both services in development mode
+# Start both services in development mode (or HTTPS LAN mode for iOS Safari getUserMedia)
 npm run dev
+npm run dev:https
+
+# Pre-cache optional Apple Silicon MPS / CUDA neural weights (MoGe-2 + DA3-SMALL)
+npm run install:neural
 ```
 
 ## Gate Execution Status
@@ -65,3 +69,4 @@ npm run dev
 - [x] **Gate 5:** Gemini Multimodal Design Co-Pilot, Hardware BOM & E2E Verification
 - [x] **Phase 2:** Google Maps Footprint + Multi-Story Condo & Balcony 3D Reconstruction
 - [x] **Phase 3:** Photorealistic 3D Tiles (`3DTilesRendererJS`), Apple Silicon Splat/Depth & Full-Bleed Spatial Studio Redesign
+- [x] **Phase 4:** Live Guided Walkaround Camera Scanner (`/scan/[sessionId]` + Phone QR Sync), `MoGe-2` + `DA3-SMALL` Neural Metric Fusion & World Labs `@sparkjsdev/spark` 3DGS

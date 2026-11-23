@@ -12,7 +12,6 @@ import {
   ContactShadows,
   GizmoHelper,
   GizmoViewport,
-  Splat,
 } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import {
@@ -22,6 +21,7 @@ import {
 } from './HouseMesh';
 import { PhotorealisticTilesScene } from './PhotorealisticTilesScene';
 import { InstancedBulbsLayer } from './InstancedBulbsLayer';
+import { SparkSplatLayer } from './SparkSplatLayer';
 import { useStudioStore, type LightingMode } from '@/store/useStudioStore';
 
 function CanvasScreenshotRegistrar({
@@ -224,6 +224,7 @@ export function StudioViewport({
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([
     0, 3.2, 0,
   ]);
+  const lastFittedJobIdRef = useRef<string | null>(null);
 
   // Frame Photorealistic 3D Tiles at a comfortable street/oblique 3D angle when entering tiles mode
   useEffect(() => {
@@ -332,10 +333,14 @@ export function StudioViewport({
       }
     });
     const activeBox = coreBox.isEmpty() ? bounds : coreBox;
-    const center = new THREE.Vector3();
-    activeBox.getCenter(center);
-    setOrbitTarget([center.x, Math.max(1.8, center.y * 0.92), center.z]);
-    setFitBounds(activeBox.clone());
+    const currentJobKey = job?.jobId || proceduralPreset || 'procedural';
+    if (lastFittedJobIdRef.current !== currentJobKey) {
+      lastFittedJobIdRef.current = currentJobKey;
+      const center = new THREE.Vector3();
+      activeBox.getCenter(center);
+      setOrbitTarget([center.x, Math.max(1.8, center.y * 0.92), center.z]);
+      setFitBounds(activeBox.clone());
+    }
     onSceneReady?.(group);
   };
 
@@ -391,9 +396,10 @@ export function StudioViewport({
             />
             {job.splatUrl && (
               <SplatErrorBoundary>
-                <React.Suspense fallback={null}>
-                  <Splat src={job.splatUrl} />
-                </React.Suspense>
+                <SparkSplatLayer
+                  splatUrl={job.splatUrl}
+                  lightingMode={lightingMode}
+                />
               </SplatErrorBoundary>
             )}
             <ContactShadows

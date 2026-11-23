@@ -14,14 +14,18 @@ import {
   Ruler,
   ChevronDown,
   FolderOpen,
+  Camera,
 } from 'lucide-react';
 import {
   CamerasPayloadSchema,
   CalibrationDetectionResultSchema,
+  LiveScanSessionSchema,
   ReconstructionJobSchema,
   type ArchitecturalBuildingSpec,
 } from '@lumen3d/shared-schemas';
 import { StudioLauncher } from '@/components/panels/StudioLauncher';
+import { LiveScanOverlay } from '@/components/panels/LiveScanOverlay';
+import type { LiveScanSessionWithQr } from '@/lib/scan/scanProxy';
 import { FloatingDock } from '@/components/panels/FloatingDock';
 import { TelemetryHUD } from '@/components/panels/TelemetryHUD';
 import { CopilotDrawer } from '@/components/panels/CopilotDrawer';
@@ -56,6 +60,9 @@ export default function HomePage() {
   const [launcherGuide, setLauncherGuide] = useState<string | null>(null);
   const [isAdjusterOpen, setIsAdjusterOpen] = useState<boolean>(false);
   const [isScaleOpen, setIsScaleOpen] = useState<boolean>(false);
+  const [liveScanSession, setLiveScanSession] =
+    useState<LiveScanSessionWithQr | null>(null);
+  const lastSyncedScanGlbRef = useRef<string | null>(null);
 
   const sceneSource = useStudioStore((s) => s.sceneSource);
   const sceneTitle = useStudioStore((s) => s.sceneTitle);
@@ -281,6 +288,102 @@ export default function HomePage() {
     }
   };
 
+  const handleStartLiveScan = async () => {
+    setLauncherGuide(null);
+    setReconstructing(true, null);
+    try {
+      const trimmedAddr = streetAddress.trim();
+      const resp = await fetch('/api/scan/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: trimmedAddr || undefined,
+        }),
+      });
+      const raw = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(
+          raw.error || 'Could not start live camera scan session (is recon-worker running?).'
+        );
+      }
+      const parsed = LiveScanSessionSchema.parse(raw);
+      lastSyncedScanGlbRef.current = null;
+      setLiveScanSession({
+        ...parsed,
+        mobileScanUrl: String(raw.mobileScanUrl || `/scan/${parsed.sessionId}`),
+        qrCodeDataUrl: String(raw.qrCodeDataUrl || ''),
+      });
+      setReconstructing(false, null);
+      setLauncherModalOpen(false);
+    } catch (err) {
+      setReconstructing(
+        false,
+        err instanceof Error ? err.message : 'Failed to start live camera scan'
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!liveScanSession) return;
+    let active = true;
+    const sid = liveScanSession.sessionId;
+    const qrData = liveScanSession.qrCodeDataUrl;
+    const mobUrl = liveScanSession.mobileScanUrl;
+
+    const timer = setInterval(async () => {
+      try {
+        const resp = await fetch(
+          `/api/scan/sessions/${encodeURIComponent(sid)}`,
+          { cache: 'no-store' }
+        );
+        if (!resp.ok || !active) return;
+        const polled = LiveScanSessionSchema.parse(await resp.json());
+        if (!active) return;
+
+        setLiveScanSession({
+          ...polled,
+          mobileScanUrl: mobUrl,
+          qrCodeDataUrl: qrData,
+        });
+
+        const nextGlb = polled.latestJob?.glbUrl;
+        if (polled.latestJob && nextGlb && nextGlb !== lastSyncedScanGlbRef.current) {
+          lastSyncedScanGlbRef.current = nextGlb;
+          const scanTitle =
+            polled.address ||
+            `Live Camera Scan (${polled.coveredSectors.length}/5 angles)`;
+          setJob(polled.latestJob, scanTitle);
+          setLauncherModalOpen(false);
+
+          if (polled.latestJob.camerasUrl) {
+            fetch(polled.latestJob.camerasUrl, { cache: 'no-store' })
+              .then(async (camResp) => {
+                if (!camResp.ok || !active) return;
+                const camPayload = CamerasPayloadSchema.parse(
+                  await camResp.json()
+                );
+                setCameras(camPayload.cameras);
+              })
+              .catch(() => {});
+          }
+        }
+      } catch {
+        // Ignore transient network hiccups during live polling
+      }
+    }, 700);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [
+    liveScanSession?.sessionId,
+    liveScanSession?.qrCodeDataUrl,
+    liveScanSession?.mobileScanUrl,
+    setCameras,
+    setJob,
+  ]);
+
   const handleAutoCalibrate = async () => {
     if (!sceneGroupRef.current || cameras.length === 0) {
       setCalibrating(false, 'Load a 3D mesh with camera metadata first.');
@@ -357,7 +460,8 @@ export default function HomePage() {
     screenshotFnRef.current = fn;
   }, []);
 
-  const showLauncher = sceneSource === 'NONE' || launcherModalOpen;
+  const showLauncher =
+    !liveScanSession && (sceneSource === 'NONE' || launcherModalOpen);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
@@ -401,6 +505,18 @@ export default function HomePage() {
                   <FolderOpen className="h-3 w-3 text-amber-300" />
                   Change Building
                 </button>
+
+                {!liveScanSession && (
+                  <button
+                    type="button"
+                    data-testid="btn-header-live-scan"
+                    onClick={() => void handleStartLiveScan()}
+                    className="inline-flex items-center gap-1 rounded-xl bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-200 ring-1 ring-emerald-400/30 hover:bg-emerald-500/25"
+                  >
+                    <Camera className="h-3 w-3 text-emerald-300" />
+                    Live Scan
+                  </button>
+                )}
 
                 {activeBuildingSpec && sceneSource === 'MESH_RECON' && (
                   <button
@@ -600,6 +716,14 @@ export default function HomePage() {
         </>
       )}
 
+      {/* Live Phone QR Pairing Modal & Real-Time Multi-View Sync HUD */}
+      {liveScanSession && (
+        <LiveScanOverlay
+          session={liveScanSession}
+          onCloseScan={() => setLiveScanSession(null)}
+        />
+      )}
+
       {/* Centered Progressive Onboarding / Building Switcher Modal */}
       {showLauncher && (
         <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]">
@@ -608,6 +732,7 @@ export default function HomePage() {
             onChangeAddress={setStreetAddress}
             onSubmitAddress={handleSubmitAddress}
             onUploadFiles={handleUploadFiles}
+            onStartLiveScan={handleStartLiveScan}
             onLoadSample={handleLoadSamplePreset}
             isBusy={isReconstructing}
             progressPercent={isReconstructing && job ? job.progress : null}
